@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.4 Estable</title>
+    <title>DriveNavigator XP - v1.4 (Workspace Pro)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        html, body, #root { height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden; background-color: #003399; }
+        html, body, #root { height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden; background-color: #ece9d8; }
         .xp-blue-gradient { background: linear-gradient(to bottom, #0058e6, #3b89ff, #0058e6); }
         .xp-taskbar { background: linear-gradient(to bottom, #245edb, #3f8cf3, #245edb); }
         .xp-context-menu { 
@@ -18,7 +18,7 @@
         }
         .xp-context-item:hover { background-color: #316ac5; color: white; }
         .xp-input { border: 1px solid #7f9db9; padding: 2px 4px; outline: none; background: white; }
-        th { cursor: pointer; user-select: none; }
+        th { cursor: pointer; user-select: none; background: #f1f1f1; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; font-weight: normal; }
         th:hover { background-color: #e2e2e2; }
     </style>
 </head>
@@ -39,7 +39,7 @@
             const ext = fileName.split('.').pop().toLowerCase();
             const iconMap = {
                 'pdf': '📕', 'doc': '📘', 'docx': '📘', 'xls': '📗', 'xlsx': '📗',
-                'jpg': '🖼️', 'png': '🖼️', 'mp3': '🎵', 'mp4': '🎬', 'txt': '📄', 'zip': '📦'
+                'jpg': '🖼️', 'png': '🖼️', 'mp3': '🎵', 'mp4': '🎬', 'txt': '📄'
             };
             return iconMap[ext] || '📄';
         };
@@ -124,33 +124,23 @@
                 return result;
             }, [files, searchQuery, sortConfig]);
 
-            // FUNCIONES DE GESTIÓN v1.4
-            const handleOpen = (f) => {
-                if (f.mimeType.includes('folder')) {
-                    setCurrentFolder({ id: f.id, name: f.name });
-                    setSelectedFiles([]); setSearchQuery("");
-                } else { window.open(`https://drive.google.com/file/d/${f.id}/view`, '_blank'); }
-                setContextMenu(null);
-            };
-
+            // FUNCIONES v1.4
             const handleCreateWorkspace = async (type) => {
                 const mimeTypes = {
                     doc: 'application/vnd.google-apps.document',
                     sheet: 'application/vnd.google-apps.spreadsheet',
                     slide: 'application/vnd.google-apps.presentation'
                 };
-                const name = prompt("Nombre del nuevo archivo:", "Nuevo Archivo");
+                const name = prompt("Nombre del archivo:", "Nuevo Archivo");
                 if (!name) return;
-                try {
-                    const res = await fetch('https://www.googleapis.com/drive/v3/files', {
-                        method: 'POST',
-                        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, mimeType: mimeTypes[type], parents: [currentFolder.id] })
-                    });
-                    const data = await res.json();
-                    fetchFiles(currentFolder.id);
-                    window.open(`https://docs.google.com/${type === 'doc' ? 'document' : type === 'sheet' ? 'spreadsheets' : 'presentation'}/d/${data.id}/edit`, '_blank');
-                } catch (e) { alert("Error al crear archivo"); }
+                const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, mimeType: mimeTypes[type], parents: [currentFolder.id] })
+                });
+                const data = await res.json();
+                fetchFiles(currentFolder.id);
+                window.open(`https://docs.google.com/${type==='doc'?'document':type==='sheet'?'spreadsheets':'presentation'}/d/${data.id}/edit`, '_blank');
                 setContextMenu(null);
             };
 
@@ -175,115 +165,12 @@
                 setContextMenu(null);
             };
 
-            const handleCreateFolder = async () => {
-                const name = prompt("Nombre de la carpeta:", "Nueva Carpeta");
-                if (!name) return;
-                await fetch('https://www.googleapis.com/drive/v3/files', {
-                    method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [currentFolder.id] })
-                });
-                fetchFiles(currentFolder.id);
-                setContextMenu(null);
-            };
-
-            if (!accessToken) return (
-                <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans">
-                    <h1 className="text-6xl font-bold italic mb-10">Windows<span className="text-[#ff8a00]">xp</span></h1>
-                    <button onClick={() => tokenClient && tokenClient.requestAccessToken()} className="bg-white/10 p-4 border border-white/20 rounded-lg hover:bg-white/20 shadow-xl">
-                        👤 Workspace Login
-                    </button>
-                </div>
-            );
-
-            return (
-                <div className="h-full w-full flex flex-col font-sans text-xs bg-[#ece9d8]" onClick={() => {setSelectedFiles([]); setContextMenu(null);}}>
-                    <input type="file" ref={fileInputRef} className="hidden" onChange={async (e) => {
-                        const file = e.target.files[0]; if (!file) return;
-                        const metadata = { name: file.name, parents: [currentFolder.id] };
-                        const formData = new FormData();
-                        formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-                        formData.append('file', file);
-                        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-                            method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: formData
-                        });
-                        fetchFiles(currentFolder.id);
-                    }} />
-
-                    <div className="h-8 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold flex-shrink-0">
-                        <span>📂 {currentFolder.name} - DriveNavigator v1.4</span>
-                        <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-6 border border-white/50 rounded-sm">X</button>
-                    </div>
-
-                    <div className="bg-[#ece9d8] border-b border-gray-400 p-1 flex flex-col gap-1 flex-shrink-0">
-                        <div className="flex items-center gap-2">
-                            <button onClick={() => setViewMode('medium')} className={`px-2 py-1 border border-gray-400 ${viewMode==='medium'?'bg-white shadow-inner':'bg-gray-100'}`}>Iconos</button>
-                            <button onClick={() => setViewMode('details')} className={`px-2 py-1 border border-gray-400 ${viewMode==='details'?'bg-white shadow-inner':'bg-gray-100'}`}>Detalles</button>
-                            <span className="ml-4 font-bold text-gray-600">Ordenar:</span>
-                            <select className="xp-input text-[11px]" onChange={(e) => setSortConfig({key: e.target.value, direction: 'asc'})}>
-                                <option value="name">Nombre</option>
-                                <option value="size">Tamaño</option>
-                                <option value="modifiedTime">Fecha</option>
-                            </select>
-                        </div>
-                        <div className="flex items-center gap-2 p-1 bg-[#f1f1f1] border border-gray-300">
-                            <span className="font-bold ml-1 text-gray-600">Búsqueda:</span>
-                            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Filtrar archivos..." className="flex-1 xp-input text-[11px]" onClick={(e)=>e.stopPropagation()}/>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 flex overflow-hidden">
-                        <div className="w-56 bg-white border-r border-gray-400 overflow-y-auto shadow-inner">
-                            <div className="p-2 bg-gradient-to-r from-[#eff3ff] to-[#ccd9ff] font-bold text-[#215dc6] border-b">Carpetas</div>
-                            <div className={`p-1 flex items-center gap-1 cursor-pointer ${currentFolder.id==='root'?'bg-blue-600 text-white':''}`} onClick={()=>setCurrentFolder({id:'root', name:'Mi unidad'})}>📁 Mi unidad</div>
-                        </div>
-
-                        <div className="flex-1 bg-white overflow-y-auto relative p-4" onContextMenu={(e) => { e.preventDefault(); setContextMenu({x: e.pageX, y: e.pageY, type: 'bg'}); }}>
-                            <div className={viewMode === 'details' ? 'flex flex-col' : 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-6'}>
-                                {processedFiles.map(f => (
-                                    <div key={f.id} 
-                                         onClick={(e) => {e.stopPropagation(); setSelectedFiles([f.id]); setContextMenu(null);}}
-                                         onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setSelectedFiles([f.id]); setContextMenu({x: e.pageX, y: e.pageY, f, type:'file'});}}
-                                         onDoubleClick={() => handleOpen(f)}
-                                         className={`flex flex-col items-center p-2 rounded cursor-pointer ${selectedFiles.includes(f.id)?'bg-[#316ac5] text-white':'hover:bg-blue-50'}`}>
-                                        <div className="text-4xl">{getFileIcon(f.mimeType, f.name)}</div>
-                                        <span className="truncate w-full text-center">{f.name}</span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {contextMenu && (
-                                <div className="xp-context-menu fixed w-48 py-1" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e)=>e.stopPropagation()}>
-                                    {contextMenu.type === 'file' ? (
-                                        <>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => handleOpen(contextMenu.f)}>Abrir</div>
-                                            <div className="border-b my-1 border-gray-300"></div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => handleRename(contextMenu.f)}>Renombrar</div>
-                                            <div className="xp-context-item px-4 py-1 text-red-600" onClick={() => handleDelete(contextMenu.f)}>Eliminar</div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div className="xp-context-item px-4 py-1" onClick={handleCreateFolder}>Nueva Carpeta</div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => fileInputRef.current.click()}>Subir Archivo</div>
-                                            <div className="border-b my-1 border-gray-300"></div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => handleCreateWorkspace('doc')}>Nuevo Google Doc</div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => handleCreateWorkspace('sheet')}>Nueva Hoja Cálculo</div>
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="h-6 bg-[#ece9d8] border-t border-gray-400 flex items-center justify-between px-3 text-[10px] text-gray-700 flex-shrink-0">
-                        <div>{processedFiles.length} objetos | Almacenamiento: {(driveInfo.usage / 1e9).toFixed(2)} GB</div>
-                        <div className="font-bold">{new Date().toLocaleTimeString()}</div>
-                    </div>
-                </div>
-            );
-        };
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+            const FolderItem = ({ folder, level = 0 }) => (
+                <div key={folder.id}>
+                    <div className={`flex items-center gap-1 p-1 cursor-pointer hover:bg-blue-100 ${currentFolder.id === folder.id ? 'bg-[#316ac5] text-white' : 'text-black'}`} style={{ paddingLeft: `${level * 12 + 4}px` }}>
+                        <span className="font-mono text-[10px] w-4" onClick={(e) => { e.stopPropagation(); toggleFolder(folder.id); }}>
+                            {expandedFolders[folder.id] ? '[-]' : '[+]'}
+                        </span>
+                        <span className="flex-1 truncate text-[11px]" onClick={() => {setCurrentFolder({ id: folder.id, name: folder.name }); setSelectedFiles([]); setSearchQuery("");}}>
+                            📁 {folder.name}
+                        </span>
