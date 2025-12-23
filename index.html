@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.61 (Full Restore)</title>
+    <title>DriveNavigator XP - v1.62 (Safe Load)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -14,15 +14,19 @@
         .preview-pane { background: linear-gradient(to bottom, #748aff, #d6dff7); border-left: 1px solid #0058e6; }
         .xp-panel-header { background: linear-gradient(to right, #2151d1, #7392f7); color: white; padding: 2px 8px; font-weight: bold; border-radius: 4px 4px 0 0; }
         .xp-panel-body { background: #d6dff7; border: 1px solid #ffffff; border-top: none; padding: 8px; margin-bottom: 8px; }
-        th { cursor: pointer; user-select: none; background: #f1f1f1; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; font-weight: normal; }
+        th { cursor: pointer; user-select: none; background: #f1f1f1; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; font-weight: normal; font-size: 10px; }
         .xp-context-menu { box-shadow: 2px 2px 5px rgba(0,0,0,0.4); border: 1px solid #716f64; background-color: white; z-index: 9999; }
         .xp-context-item:hover { background-color: #316ac5; color: white; }
-        /* Media Player Windows */
-        .media-player-win { position: fixed; top: 15%; left: 25%; width: 500px; background: #ece9d8; border: 3px solid #0058e6; z-index: 10000; box-shadow: 0 20px 50px rgba(0,0,0,0.5); border-radius: 4px; }
+        .media-player-win { position: fixed; top: 15%; left: 25%; width: 450px; background: #ece9d8; border: 3px solid #0058e6; z-index: 10000; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:white; font-family:sans-serif;">
+            <h1 style="font-size:3rem; font-style:italic; font-weight:bold;">Windows<span style="color:#ff8a00;">xp</span></h1>
+            <p>Cargando archivos de sistema...</p>
+        </div>
+    </div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
@@ -40,27 +44,29 @@
             const [contextMenu, setContextMenu] = useState(null);
             const [clipboard, setClipboard] = useState({ ids: [], action: null });
             const [activeMedia, setActiveMedia] = useState(null);
-            const fileInputRef = useRef(null);
-
-            const getIcon = (f) => {
-                if (f.mimeType.includes('folder')) return "📁";
-                if (f.mimeType.includes('audio')) return "🎵";
-                if (f.mimeType.includes('video')) return "🎬";
-                if (f.mimeType.includes('image')) return "🖼️";
-                return "📄";
-            };
 
             useEffect(() => {
-                const scriptGis = document.createElement('script');
-                scriptGis.src = "https://accounts.google.com/gsi/client";
-                scriptGis.onload = () => {
+                const initGis = () => {
                     const client = window.google.accounts.oauth2.initTokenClient({
                         client_id: CLIENT_ID, scope: SCOPES,
                         callback: (resp) => { if (resp.access_token) setAccessToken(resp.access_token); },
                     });
                     setTokenClient(client);
                 };
+
+                const scriptGis = document.createElement('script');
+                scriptGis.src = "https://accounts.google.com/gsi/client";
+                scriptGis.onload = initGis;
                 document.head.appendChild(scriptGis);
+
+                const scriptGapi = document.createElement('script');
+                scriptGapi.src = "https://apis.google.com/js/api.js";
+                scriptGapi.onload = () => {
+                    window.gapi.load('client', () => {
+                        window.gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+                    });
+                };
+                document.head.appendChild(scriptGapi);
             }, []);
 
             const fetchFiles = async (folderId) => {
@@ -76,23 +82,16 @@
 
             useEffect(() => { if (accessToken) fetchFiles(currentFolder.id); }, [accessToken, currentFolder.id]);
 
-            const toggleFolder = async (id) => {
-                if (expandedFolders[id]) { setExpandedFolders(prev => ({ ...prev, [id]: null })); }
-                else {
+            const toggleFolder = async (id, e) => {
+                e.stopPropagation();
+                if (expandedFolders[id]) {
+                    setExpandedFolders(prev => ({ ...prev, [id]: null }));
+                } else {
                     const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id, name)`, {
                         headers: { Authorization: `Bearer ${accessToken}` }
                     });
                     const data = await res.json();
                     setExpandedFolders(prev => ({ ...prev, [id]: data.files || [] }));
-                }
-            };
-
-            const handleFileClick = (id, e) => {
-                e.stopPropagation();
-                if (e.ctrlKey) {
-                    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-                } else {
-                    setSelectedIds([id]);
                 }
             };
 
@@ -104,55 +103,141 @@
                 fetchFiles(currentFolder.id);
             };
 
-            const handlePaste = async () => {
-                if (!clipboard.ids.length) return;
-                for (const id of clipboard.ids) {
-                    if (clipboard.action === 'copy') {
-                        await fetch(`https://www.googleapis.com/drive/v3/files/${id}/copy`, {
-                            method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ parents: [currentFolder.id] })
-                        });
-                    }
-                }
-                setClipboard({ ids: [], action: null });
-                fetchFiles(currentFolder.id);
-            };
-
             const FolderTree = ({ folder, level = 0 }) => (
                 <div key={folder.id}>
-                    <div className={`flex items-center gap-1 p-1 cursor-pointer hover:bg-blue-100 ${currentFolder.id === folder.id ? 'bg-[#316ac5] text-white' : ''}`} style={{ paddingLeft: `${level * 10 + 4}px` }}>
-                        <span className="w-4 font-mono text-[9px]" onClick={(e) => { e.stopPropagation(); toggleFolder(folder.id); }}>
-                            {expandedFolders[folder.id] ? '[-]' : '[+]'}
+                    <div className={`flex items-center gap-1 p-1 cursor-pointer hover:bg-blue-100 ${currentFolder.id === folder.id ? 'bg-[#316ac5] text-white' : ''}`} 
+                         style={{ paddingLeft: `${level * 10 + 4}px` }}
+                         onClick={() => {setCurrentFolder({id: folder.id, name: folder.name}); setSelectedIds([]);}}>
+                        <span className="w-4 font-mono text-[9px] border border-gray-300 text-center bg-white text-black leading-tight" 
+                              onClick={(e) => toggleFolder(folder.id, e)}>
+                            {expandedFolders[folder.id] ? '-' : '+'}
                         </span>
-                        <span className="truncate" onClick={() => {setCurrentFolder({id: folder.id, name: folder.name}); setSelectedIds([]);}}>📁 {folder.name}</span>
+                        <span className="truncate">📁 {folder.name}</span>
                     </div>
                     {expandedFolders[folder.id] && expandedFolders[folder.id].map(sub => <FolderTree key={sub.id} folder={sub} level={level + 1} />)}
                 </div>
             );
 
-            // Pantalla de Bienvenida XP
             if (!accessToken) return (
-                <div className="h-full w-full flex flex-col items-center justify-center bg-[#5a7edc] text-white font-sans overflow-hidden">
-                    <div className="w-full h-1/2 bg-[#003399] flex items-center justify-center border-b-4 border-[#ff8a00]">
-                         <h1 className="text-7xl font-bold italic drop-shadow-xl">Windows<span className="text-[#ff8a00]">xp</span></h1>
+                <div className="h-full w-full flex flex-col items-center justify-center bg-[#5a7edc] font-sans">
+                    <div className="w-full h-1/2 bg-[#003399] flex items-center justify-center border-b-4 border-[#ff8a00] shadow-lg">
+                        <h1 className="text-7xl font-bold italic text-white drop-shadow-md">Windows<span className="text-[#ff8a00]">xp</span></h1>
                     </div>
                     <div className="w-full h-1/2 flex items-center justify-center bg-[#5a7edc] gap-12">
-                        <div className="flex flex-col items-center">
-                            <div onClick={() => tokenClient.requestAccessToken()} className="w-24 h-24 bg-blue-600 rounded-lg border-2 border-white shadow-xl flex items-center justify-center text-5xl cursor-pointer hover:scale-105 transition-transform active:brightness-90">👤</div>
-                            <p className="mt-4 text-2xl font-bold drop-shadow-md">Workspace User</p>
-                            <p className="text-blue-100 italic">Haga clic aquí para iniciar sesión</p>
+                        <div className="flex flex-col items-center group cursor-pointer" onClick={() => tokenClient && tokenClient.requestAccessToken()}>
+                            <div className="w-20 h-20 bg-blue-600 rounded-lg border-2 border-white shadow-xl flex items-center justify-center text-4xl text-white group-hover:brightness-110">👤</div>
+                            <p className="mt-2 text-xl font-bold text-white drop-shadow-sm">Workspace User</p>
+                            <p className="text-blue-100 text-xs">Haga clic para comenzar</p>
                         </div>
                     </div>
                 </div>
             );
 
             return (
-                <div className="h-full w-full flex flex-col bg-[#ece9d8] font-sans text-[11px]" onClick={() => {setSelectedIds([]); setContextMenu(null);}}>
-                    <div className="h-7 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold">
-                        <span>📂 {currentFolder.name} - DriveNavigator v1.61</span>
+                <div className="h-full w-full flex flex-col bg-[#ece9d8] font-sans text-[11px]" onClick={() => {setContextMenu(null); setSelectedIds([]);}}>
+                    <div className="h-7 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold flex-shrink-0">
+                        <span>📂 {currentFolder.name} - DriveNavigator v1.62</span>
                         <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-5 rounded-sm">X</button>
                     </div>
 
                     <div className="flex-1 flex overflow-hidden">
-                        {/* Panel Izquierdo: Arbol Pro */}
-                        <div className="w-56 bg-white border-r border-gray-400 overflow-y-auto" onClick
+                        <div className="w-48 bg-white border-r border-gray-400 overflow-y-auto flex-shrink-0" onClick={(e)=>e.stopPropagation()}>
+                            <div className="p-1 bg-[#f1f1f1] font-bold border-b text-blue-800 text-[10px]">CARPETAS</div>
+                            <FolderTree folder={{id: 'root', name: 'Mi unidad'}} />
+                        </div>
+
+                        <div className="flex-1 bg-white overflow-y-auto relative" onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setContextMenu({x: e.pageX, y: e.pageY, type:'bg'});}}>
+                            <table className="w-full text-left border-collapse">
+                                <thead className="sticky top-0 bg-gray-100 z-10 shadow-sm">
+                                    <tr>
+                                        <th className="p-1 border-r">Nombre</th>
+                                        <th className="p-1 w-20">Tamaño</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {files.map(f => (
+                                        <tr key={f.id} 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (e.ctrlKey) setSelectedIds(prev => prev.includes(f.id) ? prev.filter(i => i !== f.id) : [...prev, f.id]);
+                                                else setSelectedIds([f.id]);
+                                            }}
+                                            onDoubleClick={() => {
+                                                if(f.mimeType.includes('folder')) setCurrentFolder({id: f.id, name: f.name});
+                                                else if(f.mimeType.includes('audio') || f.mimeType.includes('video')) setActiveMedia(f);
+                                                else window.open(f.webViewLink);
+                                            }}
+                                            onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setSelectedIds([f.id]); setContextMenu({x: e.pageX, y: e.pageY, f, type:'file'});}}
+                                            className={`cursor-pointer ${selectedIds.includes(f.id) ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-50'}`}>
+                                            <td className="p-1 truncate">
+                                                {f.mimeType.includes('folder') ? '📁' : (f.mimeType.includes('video') ? '🎬' : '📄')} {f.name}
+                                            </td>
+                                            <td className="p-1 opacity-60 font-mono text-[9px]">{f.size ? (f.size/1024).toFixed(1)+'KB' : '--'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+
+                            {contextMenu && (
+                                <div className="xp-context-menu fixed w-44 py-1" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e)=>e.stopPropagation()}>
+                                    {contextMenu.type === 'file' ? (
+                                        <>
+                                            <div className="xp-context-item px-4 py-1" onClick={() => window.open(contextMenu.f.webViewLink)}>Abrir</div>
+                                            <div className="xp-context-item px-4 py-1" onClick={() => {setClipboard({ids: selectedIds, action:'copy'}); setContextMenu(null);}}>Copiar selección</div>
+                                            <div className="border-b my-1 border-gray-300"></div>
+                                            <div className="xp-context-item px-4 py-1 text-red-600" onClick={() => {if(confirm("¿Borrar?")) selectedIds.forEach(id => apiCall(`https://www.googleapis.com/drive/v3/files/${id}`, 'PATCH', {trashed: true}));}}>Eliminar</div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            {clipboard.ids.length > 0 && <div className="xp-context-item px-4 py-1 font-bold bg-blue-50" onClick={async () => {
+                                                for(const id of clipboard.ids) await fetch(`https://www.googleapis.com/drive/v3/files/${id}/copy`, {method:'POST', headers:{Authorization:`Bearer ${accessToken}`, 'Content-Type':'application/json'}, body:JSON.stringify({parents:[currentFolder.id]})});
+                                                fetchFiles(currentFolder.id); setClipboard({ids:[], action:null});
+                                            }}>📋 Pegar aquí</div>}
+                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Carpeta:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.folder', parents:[currentFolder.id]});}}>Nueva Carpeta</div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="w-56 preview-pane p-2 flex flex-col flex-shrink-0" onClick={(e)=>e.stopPropagation()}>
+                            <div className="xp-panel-header">Tareas</div>
+                            <div className="xp-panel-body flex flex-col gap-1">
+                                {selectedIds.length > 0 ? (
+                                    <>
+                                        <button onClick={() => setClipboard({ids: selectedIds, action:'copy'})} className="text-left hover:underline text-blue-900">📋 Copiar selección</button>
+                                        <button onClick={() => {if(confirm("¿Borrar?")) selectedIds.forEach(id => apiCall(`https://www.googleapis.com/drive/v3/files/${id}`, 'PATCH', {trashed: true}));}} className="text-left hover:underline text-red-700 font-bold italic">🗑️ Eliminar</button>
+                                    </>
+                                ) : (
+                                    <p className="italic opacity-50">Seleccione ítems...</p>
+                                )}
+                            </div>
+                            <div className="xp-panel-header">Detalles</div>
+                            <div className="xp-panel-body text-[10px]">
+                                {selectedIds.length === 1 ? <p><b>Nombre:</b><br/>{files.find(f=>f.id===selectedIds[0])?.name}</p> : <p>{selectedIds.length} seleccionados</p>}
+                            </div>
+                        </div>
+                    </div>
+
+                    {activeMedia && (
+                        <div className="media-player-win">
+                            <div className="h-6 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold">
+                                <span className="truncate">Windows Media Player</span>
+                                <button onClick={() => setActiveMedia(null)} className="bg-red-600 px-2 rounded-sm h-4">X</button>
+                            </div>
+                            <div className="bg-black p-1">
+                                <video controls autoPlay className="w-full max-h-[250px]">
+                                    <source src={`https://www.googleapis.com/drive/v3/files/${activeMedia.id}?alt=media&access_token=${accessToken}`} type={activeMedia.mimeType} />
+                                </video>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
