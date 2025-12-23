@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Drive Explorer XP - v2.0</title>
+    <title>Drive Explorer XP Pro - v3.0</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -16,23 +16,14 @@
         const { useState, useEffect, useCallback } = React;
 
         const CLIENT_ID = "483723699126-qnf9lr8p8c9cnud19lkceiv92022c1rs.apps.googleusercontent.com";
-        const SCOPES = "https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/drive.file";
+        const SCOPES = "https://www.googleapis.com/auth/drive"; // Permisos de escritura
 
-        // --- LÓGICA DE ICONOS POR EXTENSIÓN ---
         const getFileIcon = (mimeType, fileName) => {
             if (mimeType === 'application/vnd.google-apps.folder') return "📁";
             const ext = fileName.split('.').pop().toLowerCase();
             const iconMap = {
-                'pdf': '📕',
-                'doc': '📘', 'docx': '📘',
-                'xls': '📗', 'xlsx': '📗', 'csv': '📗',
-                'ppt': '📙', 'pptx': '📙',
-                'jpg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'svg': '🖼️',
-                'mp3': '🎵', 'wav': '🎵',
-                'mp4': '🎬', 'mov': '🎬',
-                'zip': '📦', 'rar': '📦', '7z': '📦',
-                'txt': '📄',
-                'html': '🌐', 'js': '📜', 'css': '🎨'
+                'pdf': '📕', 'doc': '📘', 'docx': '📘', 'xls': '📗', 'xlsx': '📗',
+                'jpg': '🖼️', 'png': '🖼️', 'mp3': '🎵', 'mp4': '🎬', 'txt': '📄', 'zip': '📦'
             };
             return iconMap[ext] || '📄';
         };
@@ -41,188 +32,183 @@
             const [tokenClient, setTokenClient] = useState(null);
             const [accessToken, setAccessToken] = useState(null);
             const [files, setFiles] = useState([]);
-            const [treeFolders, setTreeFolders] = useState([]); // Para el menú izquierdo
             const [currentFolder, setCurrentFolder] = useState({ id: 'root', name: 'Mi unidad' });
-            const [viewMode, setViewMode] = useState('medium'); // medium, small, list, details
-            const [loading, setLoading] = useState(false);
+            const [expandedFolders, setExpandedFolders] = useState({}); // Control de árbol
+            const [folderTree, setFolderTree] = useState([]);
+            const [viewMode, setViewMode] = useState('medium');
 
-            // Inicialización de Google API
             useEffect(() => {
-                const loadScripts = () => {
-                    const scriptGis = document.createElement('script');
-                    scriptGis.src = "https://accounts.google.com/gsi/client";
-                    scriptGis.async = true;
-                    scriptGis.onload = () => {
-                        const client = window.google.accounts.oauth2.initTokenClient({
-                            client_id: CLIENT_ID,
-                            scope: SCOPES,
-                            callback: (resp) => setAccessToken(resp.access_token),
-                        });
-                        setTokenClient(client);
-                    };
-                    document.head.appendChild(scriptGis);
+                const initGoogle = () => {
+                    const client = window.google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: SCOPES,
+                        callback: (resp) => setAccessToken(resp.access_token),
+                    });
+                    setTokenClient(client);
 
-                    const scriptGapi = document.createElement('script');
-                    scriptGapi.src = "https://apis.google.com/js/api.js";
-                    scriptGapi.onload = () => {
-                        window.gapi.load('client', () => {
-                            window.gapi.client.init({
-                                discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
-                            });
-                        });
-                    };
-                    document.head.appendChild(scriptGapi);
+                    window.gapi.load('client', () => {
+                        window.gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+                    });
                 };
-                loadScripts();
+
+                const scriptGis = document.createElement('script');
+                scriptGis.src = "https://accounts.google.com/gsi/client";
+                scriptGis.onload = initGoogle;
+                document.head.appendChild(scriptGis);
+
+                const scriptGapi = document.createElement('script');
+                scriptGapi.src = "https://apis.google.com/js/api.js";
+                document.head.appendChild(scriptGapi);
             }, []);
 
-            // Cargar archivos de la carpeta actual
             const fetchFiles = async (folderId) => {
                 if (!accessToken) return;
-                setLoading(true);
-                try {
-                    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, size, modifiedTime)&pageSize=100`, {
-                        headers: { Authorization: `Bearer ${accessToken}` }
-                    });
-                    const data = await res.json();
-                    setFiles(data.files || []);
-                } catch (e) { console.error(e); }
-                finally { setLoading(false); }
-            };
-
-            // Cargar árbol de carpetas inicial para el menú izquierdo
-            const fetchTree = async () => {
-                if (!accessToken) return;
-                const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.folder' and trashed = false&fields=files(id, name)&pageSize=20`, {
+                const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, size, modifiedTime)&pageSize=100`, {
                     headers: { Authorization: `Bearer ${accessToken}` }
                 });
                 const data = await res.json();
-                setTreeFolders(data.files || []);
+                setFiles(data.files || []);
             };
 
-            useEffect(() => {
-                if (accessToken) {
-                    fetchFiles(currentFolder.id);
-                    fetchTree();
-                }
-            }, [accessToken, currentFolder.id]);
+            const fetchSubfolders = async (parentId) => {
+                const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id, name)`, {
+                    headers: { Authorization: `Bearer ${accessToken}` }
+                });
+                const data = await res.json();
+                return data.files || [];
+            };
 
-            if (!accessToken) {
-                return (
-                    <div className="h-screen w-screen flex flex-col items-center justify-center text-white font-sans">
-                        <div className="mb-8 text-center">
-                            <h1 className="text-6xl font-bold italic">Windows <span className="text-orange-500">xp</span></h1>
-                            <p className="text-xl mt-2">Inicie sesión para explorar su Drive</p>
-                        </div>
-                        <button onClick={() => tokenClient.requestAccessToken()} className="bg-white/20 border-2 border-white/50 p-4 rounded-xl hover:bg-white/30 transition-all flex items-center gap-4">
-                            <div className="text-4xl">👤</div>
-                            <div className="text-left"><p className="font-bold">Usuario Drive</p><p className="text-xs">Haga clic aquí</p></div>
-                        </button>
+            // LÓGICA DE GESTIÓN (Renombrar, Borrar, Mover)
+            const renameFile = async (fileId, oldName) => {
+                const newName = prompt("Nuevo nombre para el archivo:", oldName);
+                if (!newName || newName === oldName) return;
+
+                await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+                    method: 'PATCH',
+                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+                fetchFiles(currentFolder.id);
+            };
+
+            const deleteFile = async (fileId, fileName) => {
+                const confirm1 = confirm(`¿Estás seguro de que quieres eliminar "${fileName}"?`);
+                if (confirm1) {
+                    const confirm2 = confirm(`ESTA ACCIÓN NO SE PUEDE DESHACER.\n¿Confirmas la eliminación definitiva de "${fileName}"?`);
+                    if (confirm2) {
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+                            method: 'DELETE',
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+                        fetchFiles(currentFolder.id);
+                    }
+                }
+            };
+
+            const toggleFolder = async (id) => {
+                if (expandedFolders[id]) {
+                    setExpandedFolders(prev => ({ ...prev, [id]: null }));
+                } else {
+                    const subs = await fetchSubfolders(id);
+                    setExpandedFolders(prev => ({ ...prev, [id]: subs }));
+                }
+            };
+
+            useEffect(() => { if (accessToken) fetchFiles(currentFolder.id); }, [accessToken, currentFolder.id]);
+
+            if (!accessToken) return (
+                <div className="h-screen flex items-center justify-center bg-[#003399] text-white italic font-bold text-4xl cursor-pointer" onClick={() => tokenClient.requestAccessToken()}>
+                    WINDOWS XP: HAGA CLIC PARA INICIAR
+                </div>
+            );
+
+            // Componente recursivo para el árbol
+            const FolderItem = ({ folder, level = 0 }) => (
+                <div key={folder.id} className="select-none">
+                    <div className={`flex items-center gap-1 p-1 hover:bg-blue-100 cursor-pointer ${currentFolder.id === folder.id ? 'bg-blue-200' : ''}`} style={{ paddingLeft: `${level * 12 + 4}px` }}>
+                        <span onClick={(e) => { e.stopPropagation(); toggleFolder(folder.id); }}>
+                            {expandedFolders[folder.id] ? '[-] ' : '[+] '}
+                        </span>
+                        <span className="flex-1 truncate" onClick={() => setCurrentFolder({ id: folder.id, name: folder.name })}>
+                            📁 {folder.name}
+                        </span>
                     </div>
-                );
-            }
+                    {expandedFolders[folder.id] && expandedFolders[folder.id].map(sub => (
+                        <FolderItem key={sub.id} folder={sub} level={level + 1} />
+                    ))}
+                </div>
+            );
 
             return (
-                <div className="h-screen w-screen flex flex-col bg-[#ece9d8] font-sans text-xs select-none overflow-hidden">
-                    {/* Barra de Título */}
+                <div className="h-screen w-screen flex flex-col bg-[#ece9d8] font-sans text-xs overflow-hidden">
                     <div className="h-8 bg-gradient-to-b from-[#0058e6] to-[#0058e6] flex items-center justify-between px-2 text-white font-bold">
-                        <div className="flex items-center gap-2"><span>📂 {currentFolder.name}</span></div>
+                        <span>{currentFolder.name} - Explorador Profesional</span>
                         <div className="flex gap-1">
-                            <button className="w-6 h-5 bg-blue-500 border border-white/50 rounded-sm">_</button>
-                            <button className="w-6 h-5 bg-blue-500 border border-white/50 rounded-sm">□</button>
-                            <button onClick={() => window.location.reload()} className="w-6 h-5 bg-red-600 border border-white/50 rounded-sm">X</button>
+                            <button onClick={() => setAccessToken(null)} className="w-6 h-5 bg-red-600 border border-white/50 rounded-sm">X</button>
                         </div>
                     </div>
 
-                    {/* Barra de Herramientas (Modos de Vista) */}
-                    <div className="flex items-center gap-2 p-1 border-b border-gray-300 bg-[#ece9d8]">
-                        <span className="font-bold px-2">Vistas:</span>
-                        <button onClick={() => setViewMode('medium')} className={`px-2 py-1 border ${viewMode === 'medium' ? 'bg-white border-gray-400' : 'border-transparent'}`}>Iconos Grandes</button>
-                        <button onClick={() => setViewMode('small')} className={`px-2 py-1 border ${viewMode === 'small' ? 'bg-white border-gray-400' : 'border-transparent'}`}>Iconos Pequeños</button>
-                        <button onClick={() => setViewMode('list')} className={`px-2 py-1 border ${viewMode === 'list' ? 'bg-white border-gray-400' : 'border-transparent'}`}>Lista</button>
-                        <button onClick={() => setViewMode('details')} className={`px-2 py-1 border ${viewMode === 'details' ? 'bg-white border-gray-400' : 'border-transparent'}`}>Detalles</button>
+                    <div className="flex items-center gap-1 p-1 border-b border-gray-300 bg-[#ece9d8]">
+                        <button onClick={() => setViewMode('medium')} className="px-2 border border-gray-400 bg-white">Iconos</button>
+                        <button onClick={() => setViewMode('details')} className="px-2 border border-gray-400 bg-white">Detalles</button>
+                        <div className="w-[2px] h-4 bg-gray-400 mx-2"></div>
+                        <span className="text-blue-800 italic font-bold">Doble clic para abrir | Click derecho para opciones (consola)</span>
                     </div>
 
                     <div className="flex-1 flex overflow-hidden">
-                        {/* MENÚ DE NAVEGACIÓN IZQUIERDO (Árbol de carpetas) */}
-                        <div className="w-56 bg-white border-r border-gray-400 overflow-y-auto p-2">
-                            <p className="font-bold text-blue-800 border-b mb-2">Carpetas</p>
-                            <div 
-                                onClick={() => setCurrentFolder({id: 'root', name: 'Mi unidad'})}
-                                className={`flex items-center gap-1 p-1 cursor-pointer hover:bg-blue-100 ${currentFolder.id === 'root' ? 'bg-blue-200' : ''}`}
-                            >
-                                💾 Mi unidad
-                            </div>
-                            {treeFolders.map(folder => (
-                                <div 
-                                    key={folder.id} 
-                                    onClick={() => setCurrentFolder({id: folder.id, name: folder.name})}
-                                    className={`flex items-center gap-1 p-1 pl-4 cursor-pointer hover:bg-blue-100 truncate ${currentFolder.id === folder.id ? 'bg-blue-200' : ''}`}
-                                >
-                                    📁 {folder.name}
-                                </div>
-                            ))}
+                        {/* MENÚ IZQUIERDO DESPLEGABLE */}
+                        <div className="w-64 bg-white border-r border-gray-400 overflow-y-auto">
+                            <div className="p-2 bg-gray-100 font-bold border-b border-gray-300">Carpetas</div>
+                            <FolderItem folder={{ id: 'root', name: 'Mi unidad' }} />
                         </div>
 
-                        {/* ÁREA DE ARCHIVOS PRINCIPAL */}
+                        {/* ÁREA DE ARCHIVOS */}
                         <div className="flex-1 bg-white overflow-y-auto">
                             {viewMode === 'details' ? (
-                                <table className="w-full text-left border-collapse">
-                                    <thead className="bg-gray-100 sticky top-0 border-b border-gray-300">
-                                        <tr>
-                                            <th className="p-2 border-r font-normal">Nombre</th>
-                                            <th className="p-2 border-r font-normal">Tamaño</th>
-                                            <th className="p-2 font-normal">Modificado</th>
-                                        </tr>
+                                <table className="w-full text-left">
+                                    <thead className="bg-gray-100 border-b">
+                                        <tr><th className="p-2">Nombre</th><th className="p-2">Acciones</th></tr>
                                     </thead>
                                     <tbody>
                                         {files.map(f => (
-                                            <tr 
-                                                key={f.id} 
-                                                className="hover:bg-blue-600 hover:text-white cursor-pointer"
-                                                onDoubleClick={() => f.mimeType.includes('folder') ? setCurrentFolder({id: f.id, name: f.name}) : window.open(`https://drive.google.com/file/d/${f.id}/view`)}
-                                            >
-                                                <td className="p-1 border-b flex items-center gap-2">
-                                                    <span className="text-lg">{getFileIcon(f.mimeType, f.name)}</span>
-                                                    <span className="truncate">{f.name}</span>
+                                            <tr key={f.id} className="hover:bg-blue-600 hover:text-white group">
+                                                <td className="p-1 flex items-center gap-2" onDoubleClick={() => f.mimeType.includes('folder') ? setCurrentFolder({id: f.id, name: f.name}) : window.open(`https://drive.google.com/file/d/${f.id}/view`)}>
+                                                    <span>{getFileIcon(f.mimeType, f.name)}</span> {f.name}
                                                 </td>
-                                                <td className="p-1 border-b text-gray-500">{(f.size / 1024).toFixed(1)} KB</td>
-                                                <td className="p-1 border-b text-gray-500">{new Date(f.modifiedTime).toLocaleDateString()}</td>
+                                                <td className="p-1">
+                                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100">
+                                                        <button onClick={() => renameFile(f.id, f.name)} title="Renombrar">✏️</button>
+                                                        <button onClick={() => deleteFile(f.id, f.name)} title="Eliminar">🗑️</button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             ) : (
-                                <div className={`p-4 ${
-                                    viewMode === 'medium' ? 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-6' : 
-                                    viewMode === 'small' ? 'grid grid-cols-2 sm:grid-cols-6 md:grid-cols-8 gap-2' : 
-                                    'flex flex-col' // Modo lista
-                                }`}>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4 p-4">
                                     {files.map(f => (
-                                        <div 
-                                            key={f.id} 
-                                            onDoubleClick={() => f.mimeType.includes('folder') ? setCurrentFolder({id: f.id, name: f.name}) : window.open(`https://drive.google.com/file/d/${f.id}/view`)}
-                                            className={`flex cursor-pointer items-center hover:bg-blue-700 hover:text-white rounded p-1 ${
-                                                viewMode === 'medium' ? 'flex-col text-center' : 'flex-row gap-2'
-                                            }`}
-                                        >
-                                            <span className={viewMode === 'medium' ? 'text-4xl' : 'text-xl'}>
+                                        <div key={f.id} className="flex flex-col items-center group relative p-2 rounded hover:bg-blue-700 hover:text-white text-center">
+                                            <div className="text-4xl mb-1" onDoubleClick={() => f.mimeType.includes('folder') ? setCurrentFolder({id: f.id, name: f.name}) : window.open(`https://drive.google.com/file/d/${f.id}/view`)}>
                                                 {getFileIcon(f.mimeType, f.name)}
-                                            </span>
-                                            <span className={`truncate w-full ${viewMode === 'medium' ? 'mt-1' : ''}`}>
-                                                {f.name}
-                                            </span>
+                                            </div>
+                                            <span className="truncate w-full">{f.name}</span>
+                                            {/* Acciones Rápidas */}
+                                            <div className="absolute top-0 right-0 flex flex-col gap-1 bg-white/80 p-1 rounded border border-gray-300 opacity-0 group-hover:opacity-100 text-[10px] text-black">
+                                                <button onClick={() => renameFile(f.id, f.name)}>Renombrar</button>
+                                                <button onClick={() => deleteFile(f.id, f.name)}>Eliminar</button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
                             )}
                         </div>
                     </div>
-
-                    {/* Barra de Tareas */}
-                    <div className="h-8 bg-[#245edb] flex items-center justify-between px-1 border-t border-white/20">
-                        <div className="bg-green-600 px-4 h-full flex items-center text-white italic font-bold rounded-r-xl shadow-lg cursor-pointer">Inicio</div>
-                        <div className="bg-[#0997ff] px-4 h-full flex items-center text-white font-bold">{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                    
+                    <div className="h-8 bg-[#245edb] flex items-center px-1">
+                        <div className="bg-green-600 px-4 h-full flex items-center text-white italic font-bold rounded-r-xl shadow-lg">Inicio</div>
+                        <div className="flex-1"></div>
+                        <div className="bg-[#0997ff] px-4 h-full flex items-center text-white font-bold">{new Date().toLocaleTimeString()}</div>
                     </div>
                 </div>
             );
