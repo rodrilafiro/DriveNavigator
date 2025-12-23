@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.4 Final</title>
+    <title>DriveNavigator XP - v1.5 (Preview)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -11,11 +11,11 @@
     <style>
         html, body, #root { height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden; background-color: #003399; }
         .xp-blue-gradient { background: linear-gradient(to bottom, #0058e6, #3b89ff, #0058e6); }
-        .xp-taskbar { background: linear-gradient(to bottom, #245edb, #3f8cf3, #245edb); }
         .xp-context-menu { box-shadow: 2px 2px 5px rgba(0,0,0,0.4); border: 1px solid #716f64; background-color: white; z-index: 9999; }
         .xp-context-item:hover { background-color: #316ac5; color: white; }
         .xp-input { border: 1px solid #7f9db9; padding: 2px 4px; outline: none; background: white; }
-        th { cursor: pointer; user-select: none; background: #f1f1f1; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; }
+        th { cursor: pointer; user-select: none; background: #f1f1f1; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; font-weight: normal; }
+        .preview-pane { background: linear-gradient(to bottom, #748aff, #d6dff7); border-left: 1px solid #0058e6; }
     </style>
 </head>
 <body>
@@ -33,7 +33,7 @@
             const [files, setFiles] = useState([]);
             const [currentFolder, setCurrentFolder] = useState({ id: 'root', name: 'Mi unidad' });
             const [expandedFolders, setExpandedFolders] = useState({});
-            const [selectedFiles, setSelectedFiles] = useState([]);
+            const [selectedFileId, setSelectedFileId] = useState(null);
             const [contextMenu, setContextMenu] = useState(null);
             const [viewMode, setViewMode] = useState('medium');
             const [driveInfo, setDriveInfo] = useState({ limit: 0, usage: 0 });
@@ -41,7 +41,6 @@
             const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
             const fileInputRef = useRef(null);
 
-            // Iconos por extensión
             const getIcon = (f) => {
                 if (f.mimeType === 'application/vnd.google-apps.folder') return "📁";
                 if (f.mimeType.includes('document')) return "📝";
@@ -74,17 +73,19 @@
 
             const fetchFiles = async (folderId) => {
                 if (!accessToken) return;
-                const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, size, modifiedTime)&pageSize=100`, {
-                    headers: { Authorization: `Bearer ${accessToken}` }
-                });
-                const data = await res.json();
-                setFiles(data.files || []);
-                
-                const qRes = await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota', {
-                    headers: { Authorization: `Bearer ${accessToken}` }
-                });
-                const qData = await qRes.json();
-                setDriveInfo({ limit: qData.storageQuota.limit, usage: qData.storageQuota.usage });
+                try {
+                    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, size, modifiedTime, thumbnailLink, owners, createdTime)&pageSize=100`, {
+                        headers: { Authorization: `Bearer ${accessToken}` }
+                    });
+                    const data = await res.json();
+                    setFiles(data.files || []);
+                    
+                    const qRes = await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota', {
+                        headers: { Authorization: `Bearer ${accessToken}` }
+                    });
+                    const qData = await qRes.json();
+                    setDriveInfo({ limit: qData.storageQuota.limit, usage: qData.storageQuota.usage });
+                } catch (e) { console.error(e); }
             };
 
             const toggleFolder = async (id) => {
@@ -114,7 +115,10 @@
                 return result;
             }, [files, searchQuery, sortConfig]);
 
-            // Funciones v1.4
+            const selectedFileData = useMemo(() => 
+                files.find(f => f.id === selectedFileId), [files, selectedFileId]
+            );
+
             const apiCall = async (url, method, body) => {
                 await fetch(url, {
                     method, headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -127,8 +131,10 @@
             const FolderTree = ({ folder, level = 0 }) => (
                 <div key={folder.id}>
                     <div className={`flex items-center gap-1 p-1 cursor-pointer hover:bg-blue-100 ${currentFolder.id === folder.id ? 'bg-[#316ac5] text-white' : ''}`} style={{ paddingLeft: `${level * 10 + 4}px` }}>
-                        <span onClick={(e) => { e.stopPropagation(); toggleFolder(folder.id); }}>{expandedFolders[folder.id] ? '[-]' : '[+]'}</span>
-                        <span onClick={() => setCurrentFolder({id: folder.id, name: folder.name})}>📁 {folder.name}</span>
+                        <span className="w-4 text-center" onClick={(e) => { e.stopPropagation(); toggleFolder(folder.id); }}>
+                            {expandedFolders[folder.id] ? '[-]' : '[+]'}
+                        </span>
+                        <span className="flex-1 truncate" onClick={() => {setCurrentFolder({id: folder.id, name: folder.name}); setSelectedFileId(null);}}>📁 {folder.name}</span>
                     </div>
                     {expandedFolders[folder.id] && expandedFolders[folder.id].map(sub => <FolderTree key={sub.id} folder={sub} level={level + 1} />)}
                 </div>
@@ -137,12 +143,12 @@
             if (!accessToken) return (
                 <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans">
                     <h1 className="text-6xl font-bold italic mb-8">Windows<span className="text-orange-500">xp</span></h1>
-                    <button onClick={() => tokenClient.requestAccessToken()} className="bg-white/10 p-4 border border-white/20 rounded hover:bg-white/20">👤 Iniciar Sesión</button>
+                    <button onClick={() => tokenClient.requestAccessToken()} className="bg-white/10 p-4 border border-white/20 rounded hover:bg-white/20">👤 Entrar a Workspace</button>
                 </div>
             );
 
             return (
-                <div className="h-full w-full flex flex-col bg-[#ece9d8] font-sans text-[11px]" onClick={() => {setSelectedFiles([]); setContextMenu(null);}}>
+                <div className="h-full w-full flex flex-col bg-[#ece9d8] font-sans text-[11px]" onClick={() => {setContextMenu(null);}}>
                     <input type="file" ref={fileInputRef} className="hidden" onChange={async (e) => {
                         const file = e.target.files[0]; if (!file) return;
                         const formData = new FormData();
@@ -153,57 +159,59 @@
                     }} />
 
                     <div className="h-7 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold">
-                        <span>📂 {currentFolder.name} - DriveNavigator v1.4</span>
-                        <button onClick={() => window.location.reload()} className="bg-red-600 px-2 h-5 rounded-sm">X</button>
+                        <span>📂 {currentFolder.name} - Explorador v1.5</span>
+                        <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-5 rounded-sm">X</button>
                     </div>
 
                     <div className="bg-[#ece9d8] border-b border-gray-400 p-1 flex flex-col gap-1">
                         <div className="flex gap-2">
-                            <button onClick={() => setViewMode('medium')} className={`px-2 border ${viewMode==='medium'?'bg-white':'bg-gray-100'}`}>Iconos</button>
-                            <button onClick={() => setViewMode('details')} className={`px-2 border ${viewMode==='details'?'bg-white':'bg-gray-100'}`}>Detalles</button>
+                            <button onClick={() => setViewMode('medium')} className={`px-2 border border-gray-400 ${viewMode==='medium'?'bg-white shadow-inner':'bg-gray-100'}`}>Iconos</button>
+                            <button onClick={() => setViewMode('details')} className={`px-2 border border-gray-400 ${viewMode==='details'?'bg-white shadow-inner':'bg-gray-100'}`}>Detalles</button>
                         </div>
                         <div className="flex items-center gap-2 p-1 bg-white border border-gray-300">
-                            <span className="font-bold text-gray-500">Búsqueda:</span>
+                            <span className="font-bold text-gray-400 px-1 italic">Buscar:</span>
                             <input type="text" className="flex-1 outline-none" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onClick={(e)=>e.stopPropagation()}/>
                         </div>
                     </div>
 
                     <div className="flex-1 flex overflow-hidden">
+                        {/* Panel de Carpetas */}
                         <div className="w-56 bg-white border-r border-gray-400 overflow-y-auto">
-                            <div className="p-1 bg-[#f1f1f1] font-bold border-b text-blue-800 text-[10px]">CARPETAS</div>
+                            <div className="p-1 bg-[#f1f1f1] font-bold border-b text-blue-800">CARPETAS</div>
                             <FolderTree folder={{id: 'root', name: 'Mi unidad'}} />
                         </div>
 
+                        {/* Área de Archivos */}
                         <div className="flex-1 bg-white overflow-y-auto relative" onContextMenu={(e) => {e.preventDefault(); setContextMenu({x: e.pageX, y: e.pageY, type: 'bg'});}}>
                             {viewMode === 'details' ? (
                                 <table className="w-full text-left border-collapse">
-                                    <thead className="sticky top-0 bg-gray-100 z-10 shadow-sm text-gray-600">
+                                    <thead className="sticky top-0 bg-gray-100 z-10 shadow-sm">
                                         <tr>
-                                            <th className="p-1 border-r" onClick={() => setSortConfig({key:'name', direction: sortConfig.direction==='asc'?'desc':'asc'})}>Nombre</th>
-                                            <th className="p-1 border-r w-20" onClick={() => setSortConfig({key:'size', direction: sortConfig.direction==='asc'?'desc':'asc'})}>Tamaño</th>
+                                            <th className="p-1" onClick={() => setSortConfig({key:'name', direction: sortConfig.direction==='asc'?'desc':'asc'})}>Nombre</th>
+                                            <th className="p-1 w-20" onClick={() => setSortConfig({key:'size', direction: sortConfig.direction==='asc'?'desc':'asc'})}>Tamaño</th>
                                             <th className="p-1 w-28" onClick={() => setSortConfig({key:'modifiedTime', direction: sortConfig.direction==='asc'?'desc':'asc'})}>Fecha</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {sortedFiles.map(f => (
-                                            <tr key={f.id} onClick={(e) => {e.stopPropagation(); setSelectedFiles([f.id]);}} 
-                                                onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setSelectedFiles([f.id]); setContextMenu({x: e.pageX, y: e.pageY, f, type: 'file'});}}
+                                            <tr key={f.id} onClick={(e) => {e.stopPropagation(); setSelectedFileId(f.id);}} 
+                                                onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setSelectedFileId(f.id); setContextMenu({x: e.pageX, y: e.pageY, f, type: 'file'});}}
                                                 onDoubleClick={() => f.mimeType.includes('folder')?setCurrentFolder({id:f.id, name:f.name}):window.open(`https://drive.google.com/file/d/${f.id}/view`)}
-                                                className={`cursor-pointer ${selectedFiles.includes(f.id)?'bg-[#316ac5] text-white':'hover:bg-blue-50'}`}>
+                                                className={`cursor-pointer ${selectedFileId === f.id ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-50'}`}>
                                                 <td className="p-1 truncate">{getIcon(f)} {f.name}</td>
-                                                <td className="p-1 text-gray-500">{f.size?(f.size/1024).toFixed(1)+'KB':'--'}</td>
-                                                <td className="p-1 text-gray-500">{new Date(f.modifiedTime).toLocaleDateString()}</td>
+                                                <td className="p-1 opacity-60">{f.size?(f.size/1024).toFixed(1)+'KB':'--'}</td>
+                                                <td className="p-1 opacity-60">{new Date(f.modifiedTime).toLocaleDateString()}</td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             ) : (
-                                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 p-4">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 p-4">
                                     {sortedFiles.map(f => (
-                                        <div key={f.id} onClick={(e) => {e.stopPropagation(); setSelectedFiles([f.id]);}}
-                                             onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setSelectedFiles([f.id]); setContextMenu({x: e.pageX, y: e.pageY, f, type: 'file'});}}
+                                        <div key={f.id} onClick={(e) => {e.stopPropagation(); setSelectedFileId(f.id);}}
+                                             onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setSelectedFileId(f.id); setContextMenu({x: e.pageX, y: e.pageY, f, type: 'file'});}}
                                              onDoubleClick={() => f.mimeType.includes('folder')?setCurrentFolder({id:f.id, name:f.name}):window.open(`https://drive.google.com/file/d/${f.id}/view`)}
-                                             className={`flex flex-col items-center p-2 rounded cursor-pointer ${selectedFiles.includes(f.id)?'bg-[#316ac5] text-white':'hover:bg-blue-100'}`}>
+                                             className={`flex flex-col items-center p-2 rounded cursor-pointer ${selectedFileId === f.id ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-100'}`}>
                                             <div className="text-3xl">{getIcon(f)}</div>
                                             <span className="truncate w-full text-center">{f.name}</span>
                                         </div>
@@ -212,7 +220,7 @@
                             )}
 
                             {contextMenu && (
-                                <div className="xp-context-menu fixed w-44 py-1" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e)=>e.stopPropagation()}>
+                                <div className="xp-context-menu fixed w-44 py-1 text-[11px]" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e)=>e.stopPropagation()}>
                                     {contextMenu.type === 'file' ? (
                                         <>
                                             <div className="xp-context-item px-4 py-1" onClick={() => window.open(`https://drive.google.com/file/d/${contextMenu.f.id}/view`)}>Abrir</div>
@@ -226,17 +234,45 @@
                                             <div className="xp-context-item px-4 py-1" onClick={() => fileInputRef.current.click()}>Subir Archivo</div>
                                             <div className="border-b my-1 border-gray-300"></div>
                                             <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nombre doc:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.document', parents:[currentFolder.id]});}}>Nuevo Google Doc</div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nombre tabla:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.spreadsheet', parents:[currentFolder.id]});}}>Nueva Hoja Cálculo</div>
+                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nombre hoja:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.spreadsheet', parents:[currentFolder.id]});}}>Nueva Hoja Cálculo</div>
                                         </>
                                     )}
                                 </div>
                             )}
                         </div>
+
+                        {/* PANEL DE PREVISUALIZACIÓN v1.5 */}
+                        {selectedFileData && (
+                            <div className="w-64 preview-pane flex flex-col shadow-inner overflow-hidden animate-in slide-in-from-right duration-200">
+                                <div className="p-3">
+                                    <div className="bg-white/40 p-2 rounded-lg border border-white/50 mb-3 shadow-sm">
+                                        <h3 className="font-bold text-blue-900 truncate mb-1">{selectedFileData.name}</h3>
+                                        <div className="bg-white p-1 rounded border border-gray-300 min-h-[120px] flex items-center justify-center overflow-hidden">
+                                            {selectedFileData.thumbnailLink ? (
+                                                <img src={selectedFileData.thumbnailLink.replace('=s220', '=s400')} className="max-w-full max-h-40 object-contain shadow-sm" alt="Preview"/>
+                                            ) : (
+                                                <div className="text-6xl opacity-20">{getIcon(selectedFileData)}</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="space-y-2 text-blue-900">
+                                        <div className="bg-[#eff3ff] p-2 rounded border border-white/60">
+                                            <p className="font-bold border-b border-blue-200 mb-1">Detalles:</p>
+                                            <p><span className="opacity-70">Tipo:</span> {selectedFileData.mimeType.split('.').pop()}</p>
+                                            <p><span className="opacity-70">Tamaño:</span> {selectedFileData.size ? (selectedFileData.size/1024).toFixed(1) + ' KB' : '--'}</p>
+                                            <p><span className="opacity-70">Creado:</span> {new Date(selectedFileData.createdTime).toLocaleDateString()}</p>
+                                            <p className="truncate"><span className="opacity-70">Dueño:</span> {selectedFileData.owners?.[0]?.displayName || 'Yo'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
-                    <div className="h-6 bg-[#ece9d8] border-t border-gray-400 flex items-center justify-between px-3 text-[10px]">
-                        <div>{sortedFiles.length} elementos | Drive: {(driveInfo.usage / 1e9).toFixed(2)} GB</div>
-                        <div className="font-bold">{new Date().toLocaleTimeString()}</div>
+                    <div className="h-6 bg-[#ece9d8] border-t border-gray-400 flex items-center justify-between px-3 text-[10px] text-gray-700">
+                        <div>{sortedFiles.length} objetos | Almacenamiento: {(driveInfo.usage / 1e9).toFixed(2)} GB utilizados</div>
+                        <div className="font-bold bg-white/50 px-2 rounded">{new Date().toLocaleTimeString()}</div>
                     </div>
                 </div>
             );
