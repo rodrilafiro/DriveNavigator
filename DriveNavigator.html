@@ -1,0 +1,519 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { 
+  Folder, 
+  FileText, 
+  Image as ImageIcon, 
+  ChevronLeft, 
+  ChevronRight, 
+  Search, 
+  Settings, 
+  LogOut, 
+  HardDrive, 
+  Clock, 
+  Star, 
+  Trash2,
+  MoreVertical,
+  RefreshCw,
+  ArrowUp,
+  X,
+  Minimize2,
+  Square,
+  AlertTriangle
+} from 'lucide-react';
+
+/**
+ * CONFIGURACIÓN DE GOOGLE DRIVE
+ * Importante: Debes obtener un Client ID desde https://console.cloud.google.com/
+ */
+const CLIENT_ID = "483723699126-qnf9lr8p8c9cnud19lkceiv92022c1rs.apps.googleusercontent.com"; // REQUERIDO: Inserta tu Client ID aquí
+const SCOPES = "https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/drive.file";
+
+const App = () => {
+  const [tokenClient, setTokenClient] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
+  const [user, setUser] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [currentFolder, setCurrentFolder] = useState({ id: 'root', name: 'Mi unidad' });
+  const [history, setHistory] = useState(['root']);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [isGapiLoaded, setIsGapiLoaded] = useState(false);
+  const [isGisLoaded, setIsGisLoaded] = useState(false);
+  
+  const scriptsInitialized = useRef(false);
+
+  // Inicializar scripts de Google con mayor robustez
+  useEffect(() => {
+    if (scriptsInitialized.current) return;
+    scriptsInitialized.current = true;
+
+    const loadGoogleScripts = () => {
+      // 1. Google Identity Services (GIS)
+      if (!document.getElementById('gsi-script')) {
+        const scriptGis = document.createElement('script');
+        scriptGis.id = 'gsi-script';
+        scriptGis.src = "https://accounts.google.com/gsi/client";
+        scriptGis.async = true;
+        scriptGis.defer = true;
+        // Eliminamos crossOrigin para evitar problemas de CORS si el servidor no los soporta estrictamente
+        scriptGis.onload = () => {
+          console.log("GIS script loaded");
+          setIsGisLoaded(true);
+        };
+        scriptGis.onerror = () => {
+          // Si falla, reintentamos una vez después de un segundo
+          console.error("Error al cargar GIS, reintentando...");
+          setTimeout(() => {
+            const retryGis = document.createElement('script');
+            retryGis.src = "https://accounts.google.com/gsi/client";
+            retryGis.onload = () => setIsGisLoaded(true);
+            document.head.appendChild(retryGis);
+          }, 1000);
+        };
+        document.head.appendChild(scriptGis);
+      } else if (window.google?.accounts?.oauth2) {
+        setIsGisLoaded(true);
+      }
+
+      // 2. Google API Client (GAPI)
+      if (!document.getElementById('gapi-script')) {
+        const scriptGapi = document.createElement('script');
+        scriptGapi.id = 'gapi-script';
+        scriptGapi.src = "https://apis.google.com/js/api.js";
+        scriptGapi.async = true;
+        scriptGapi.defer = true;
+        scriptGapi.onload = () => {
+          console.log("GAPI script loaded");
+          setIsGapiLoaded(true);
+        };
+        scriptGapi.onerror = () => console.error("Error al cargar GAPI");
+        document.head.appendChild(scriptGapi);
+      } else if (window.gapi) {
+        setIsGapiLoaded(true);
+      }
+    };
+
+    loadGoogleScripts();
+  }, []);
+
+  // Inicializar clientes cuando los scripts estén listos
+  useEffect(() => {
+    if (isGapiLoaded && window.gapi) {
+      window.gapi.load('client', async () => {
+        try {
+          await window.gapi.client.init({
+            discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
+          });
+          console.log("GAPI client initialized");
+        } catch (err) {
+          console.error("GAPI init error", err);
+        }
+      });
+    }
+
+    if (isGisLoaded && window.google?.accounts?.oauth2 && CLIENT_ID) {
+      try {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: (tokenResponse) => {
+            if (tokenResponse.error !== undefined) {
+              showError("Error de autenticación: " + tokenResponse.error);
+              return;
+            }
+            setAccessToken(tokenResponse.access_token);
+            fetchUserInfo(tokenResponse.access_token);
+          },
+        });
+        setTokenClient(client);
+        console.log("GIS token client initialized");
+      } catch (err) {
+        console.error("GIS init error", err);
+      }
+    }
+  }, [isGapiLoaded, isGisLoaded, CLIENT_ID]);
+
+  const fetchUserInfo = async (token) => {
+    try {
+      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setUser(data);
+    } catch (e) {
+      console.error("No se pudo obtener info del usuario");
+    }
+  };
+
+  const handleAuth = () => {
+    if (!CLIENT_ID) {
+      showError("Falta el CLIENT_ID. Por favor, edita el código para incluir tu ID de Google Cloud.");
+      return;
+    }
+    if (tokenClient) {
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+      showError("El cliente de Google no está listo todavía. Espera un momento y vuelve a intentarlo.");
+    }
+  };
+
+  const handleLogout = () => {
+    if (accessToken) {
+      window.google.accounts.oauth2.revoke(accessToken, () => {
+        setAccessToken(null);
+        setUser(null);
+        setFiles([]);
+        setCurrentFolder({ id: 'root', name: 'Mi unidad' });
+      });
+    }
+  };
+
+  const fetchFiles = useCallback(async (folderId = 'root') => {
+    if (!accessToken) return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, iconLink, size, modifiedTime)&pageSize=100`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+      const data = await response.json();
+      setFiles(data.files || []);
+    } catch (err) {
+      showError("Error al cargar archivos: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (accessToken) {
+      fetchFiles(currentFolder.id);
+    }
+  }, [accessToken, currentFolder.id, fetchFiles]);
+
+  const navigateTo = (folder) => {
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(folder.id);
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+    setCurrentFolder(folder);
+  };
+
+  const goBack = () => {
+    if (historyIndex > 0) {
+      const prevIndex = historyIndex - 1;
+      setHistoryIndex(prevIndex);
+      setCurrentFolder({ id: history[prevIndex], name: prevIndex === 0 ? 'Mi unidad' : 'Carpeta anterior' });
+    }
+  };
+
+  const showError = (msg) => {
+    setError(msg);
+    console.error(msg);
+  };
+
+  const NoConfigView = () => (
+    <div className="flex flex-col items-center justify-center p-8 bg-[#ece9d8] border-2 border-white shadow-xl max-w-md mx-auto mt-20">
+      <div className="flex items-center gap-4 mb-4 text-red-600">
+        <AlertTriangle size={48} />
+        <h2 className="text-xl font-bold font-sans">Configuración Requerida</h2>
+      </div>
+      <p className="text-sm text-gray-700 mb-6 text-center leading-relaxed">
+        Para conectar con Google Drive, necesitas un <b>Client ID</b> de Google Cloud.<br/><br/>
+        1. Crea un proyecto en Google Cloud Console.<br/>
+        2. Habilita la Drive API.<br/>
+        3. Crea un ID de cliente OAuth (Web).<br/>
+        4. Pégalo en la variable <code>CLIENT_ID</code> (línea 24).
+      </p>
+      <button 
+        onClick={() => window.location.reload()}
+        className="px-6 py-2 bg-[#ece9d8] border-2 border-gray-500 shadow-[inset_1px_1px_#fff,1px_1px_#000] active:shadow-inner font-bold hover:bg-[#d8d4c2]"
+      >
+        Refrescar Aplicación
+      </button>
+    </div>
+  );
+
+  // Pantalla de Bienvenida XP
+  if (!accessToken) {
+    return (
+      <div className="h-screen w-screen bg-[#003399] flex flex-col items-center justify-center font-sans overflow-hidden">
+        <div className="absolute top-0 w-full h-24 bg-gradient-to-b from-[#003399] to-[#0048cb] border-b-2 border-[#1947a3]"></div>
+        
+        {!CLIENT_ID ? <NoConfigView /> : (
+          <div className="z-10 flex flex-col md:flex-row items-center gap-12 max-w-4xl px-8">
+            <div className="text-right border-r-2 border-white/20 pr-12 hidden md:block">
+              <h1 className="text-white text-5xl font-light italic">Microsoft</h1>
+              <h2 className="text-white text-7xl font-bold tracking-tighter">Windows<span className="text-orange-500 text-3xl align-top">xp</span></h2>
+            </div>
+            
+            <div className="flex flex-col items-center md:items-start gap-6">
+              <h3 className="text-white text-2xl font-light">Para comenzar, haz clic en tu usuario</h3>
+              <button 
+                onClick={handleAuth}
+                disabled={!isGisLoaded}
+                className={`group flex items-center gap-4 p-2 rounded-lg transition-all border border-transparent ${isGisLoaded ? 'hover:bg-white/10 hover:border-white/20' : 'opacity-50 cursor-wait'}`}
+              >
+                <div className="w-16 h-16 rounded shadow-md border-2 border-white/50 bg-gradient-to-br from-blue-400 to-blue-800 flex items-center justify-center overflow-hidden">
+                  <img src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${CLIENT_ID}`} alt="User" />
+                </div>
+                <div className="text-left">
+                  <p className="text-white text-xl font-bold group-hover:underline">Iniciar sesión con Google</p>
+                  <p className="text-blue-200 text-sm">{isGisLoaded ? 'Listo para conectar' : 'Cargando sistema...'}</p>
+                </div>
+              </button>
+              {error && <p className="text-red-300 text-xs italic max-w-xs bg-black/20 p-2 rounded border border-red-500/30">{error}</p>}
+            </div>
+          </div>
+        )}
+
+        <div className="absolute bottom-0 w-full h-24 bg-gradient-to-t from-[#003399] to-[#0048cb] border-t-2 border-[#1947a3] flex items-center justify-between px-12">
+          <button className="flex items-center gap-2 text-white hover:underline text-sm font-bold">
+             <div className="w-6 h-6 bg-red-600 rounded flex items-center justify-center shadow-inner border border-red-800">
+               <X size={14} />
+             </div>
+             Apagar el equipo
+          </button>
+          <p className="text-white/60 italic text-sm">Organiza tu Google Drive con la experiencia clásica de Windows.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Explorador XP
+  return (
+    <div className="h-screen w-screen flex flex-col bg-[#ece9d8] font-sans text-sm select-none">
+      
+      {/* Barra de título azul */}
+      <div className="h-8 bg-gradient-to-b from-[#0058e6] via-[#3b89ff] to-[#0058e6] flex items-center justify-between px-2 text-white font-bold shadow-sm flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 bg-[#3a6ea5] rounded-sm flex items-center justify-center border border-white/30">
+             <Folder size={14} fill="currentColor" />
+          </div>
+          <span className="truncate">{currentFolder.name} - Explorador de Drive</span>
+        </div>
+        <div className="flex gap-1">
+          <button className="w-6 h-5 bg-gradient-to-b from-[#3b89ff] to-[#0058e6] border border-white/50 rounded-sm flex items-center justify-center hover:brightness-125">
+            <Minimize2 size={12} />
+          </button>
+          <button className="w-6 h-5 bg-gradient-to-b from-[#3b89ff] to-[#0058e6] border border-white/50 rounded-sm flex items-center justify-center hover:brightness-125">
+            <Square size={10} />
+          </button>
+          <button onClick={handleLogout} className="w-10 h-5 bg-gradient-to-b from-[#e81123] to-[#b40a1a] border border-white/50 rounded-sm flex items-center justify-center hover:brightness-125">
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Barra de Menú */}
+      <div className="flex px-1 border-b border-gray-300 gap-1 py-0.5 bg-[#ece9d8]">
+        {['Archivo', 'Edición', 'Ver', 'Favoritos', 'Herramientas', 'Ayuda'].map(menu => (
+          <button key={menu} className="px-2 py-0.5 hover:bg-[#316ac5] hover:text-white rounded-sm transition-colors">{menu}</button>
+        ))}
+      </div>
+
+      {/* Botones Estándar */}
+      <div className="flex items-center gap-1 p-1 border-b border-gray-300 bg-[#ece9d8]">
+        <div className="flex items-center gap-1 pr-2 border-r border-gray-400">
+          <button 
+            onClick={goBack} 
+            className="flex items-center gap-1 px-1 py-1 hover:bg-white/40 border border-transparent hover:border-gray-400 rounded group disabled:opacity-30 disabled:grayscale transition-all" 
+            disabled={historyIndex === 0}
+          >
+             <div className="bg-[#4d8620] text-white rounded-full p-1 shadow-sm"><ChevronLeft size={16} /></div>
+             <span className="font-bold">Atrás</span>
+          </button>
+          <button className="flex items-center gap-1 px-1 py-1 opacity-30 grayscale cursor-default">
+             <div className="bg-[#4d8620] text-white rounded-full p-1 shadow-sm"><ChevronRight size={16} /></div>
+          </button>
+          <button onClick={() => navigateTo({id: 'root', name: 'Mi unidad'})} className="flex items-center gap-1 px-2 py-1 hover:bg-white/40 border border-transparent hover:border-gray-400 rounded transition-all">
+             <div className="text-blue-600"><ArrowUp size={20} /></div>
+          </button>
+        </div>
+        
+        <div className="flex items-center gap-1 px-2 border-r border-gray-400">
+          <button className="flex flex-col items-center px-2 py-0.5 hover:bg-white/40 rounded transition-all">
+            <Search size={20} className="text-blue-600" />
+            <span className="text-[10px] font-medium">Búsqueda</span>
+          </button>
+          <button className="flex flex-col items-center px-2 py-0.5 hover:bg-white/40 rounded transition-all">
+            <Folder size={20} className="text-yellow-500 fill-yellow-500" />
+            <span className="text-[10px] font-medium">Carpetas</span>
+          </button>
+        </div>
+
+        <div className="flex-1"></div>
+        <button onClick={() => fetchFiles(currentFolder.id)} className="p-2 hover:bg-gray-200 rounded transition-all mr-2">
+          <RefreshCw size={18} className={loading ? 'animate-spin text-blue-600' : 'text-gray-600'} />
+        </button>
+      </div>
+
+      {/* Barra de Dirección */}
+      <div className="flex items-center gap-2 p-1 border-b border-gray-400 bg-white">
+        <span className="text-gray-500 ml-2 font-medium">Dirección</span>
+        <div className="flex-1 flex items-center gap-2 border border-gray-300 px-2 py-0.5 shadow-inner text-gray-700 overflow-hidden whitespace-nowrap bg-white">
+          <Folder size={14} className="text-yellow-600 fill-yellow-600 flex-shrink-0" />
+          <span className="truncate">drive://{currentFolder.name}</span>
+        </div>
+        <button className="px-4 bg-[#ece9d8] border border-gray-400 text-xs py-1 hover:bg-gray-200 shadow-[1px_1px_#fff_inset]">Ir</button>
+      </div>
+
+      {/* Área de Contenido Principal */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* Panel lateral de tareas */}
+        <div className="w-64 bg-gradient-to-b from-[#7ba2e7] to-[#6375d6] p-3 overflow-y-auto hidden md:block shadow-[inset_-2px_0_5px_rgba(0,0,0,0.1)]">
+          
+          <div className="mb-4 overflow-hidden rounded-t-lg shadow-md border border-white/40">
+            <div className="bg-gradient-to-r from-[#eff3ff] to-[#ccd9ff] px-3 py-1 flex items-center justify-between border-b border-[#215dc6]">
+              <span className="font-bold text-[#215dc6]">Tareas de archivos</span>
+              <div className="w-4 h-4 rounded-full bg-[#215dc6] flex items-center justify-center text-white"><ChevronLeft size={10} className="-rotate-90" /></div>
+            </div>
+            <div className="bg-[#d6dff7] p-3 space-y-2 text-[#215dc6] text-xs">
+              <button className="flex items-center gap-2 hover:underline text-left w-full"><Folder size={14} /> Crear carpeta</button>
+              <button className="flex items-center gap-2 hover:underline text-left w-full"><ImageIcon size={14} /> Ver diapositivas</button>
+              <button onClick={() => fetchFiles(currentFolder.id)} className="flex items-center gap-2 hover:underline text-left w-full"><RefreshCw size={14} /> Refrescar archivos</button>
+            </div>
+          </div>
+
+          <div className="mb-4 overflow-hidden rounded-t-lg shadow-md border border-white/40">
+            <div className="bg-gradient-to-r from-[#eff3ff] to-[#ccd9ff] px-3 py-1 flex items-center justify-between border-b border-[#215dc6]">
+              <span className="font-bold text-[#215dc6]">Otros sitios</span>
+              <div className="w-4 h-4 rounded-full bg-[#215dc6] flex items-center justify-center text-white"><ChevronLeft size={10} className="-rotate-90" /></div>
+            </div>
+            <div className="bg-[#d6dff7] p-3 space-y-2 text-[#215dc6] text-xs">
+              <button onClick={() => navigateTo({id: 'root', name: 'Mi unidad'})} className="flex items-center gap-2 hover:underline text-left w-full"><HardDrive size={14} /> Mi unidad de Drive</button>
+              <button className="flex items-center gap-2 hover:underline text-left w-full"><Star size={14} /> Destacados</button>
+              <button className="flex items-center gap-2 hover:underline text-left w-full"><Clock size={14} /> Recientes</button>
+              <button className="flex items-center gap-2 hover:underline text-left w-full"><Trash2 size={14} /> Papelera</button>
+            </div>
+          </div>
+
+          <div className="mb-4 overflow-hidden rounded-t-lg shadow-md border border-white/40">
+            <div className="bg-gradient-to-r from-[#eff3ff] to-[#ccd9ff] px-3 py-1 flex items-center justify-between border-b border-[#215dc6]">
+              <span className="font-bold text-[#215dc6]">Detalles</span>
+              <div className="w-4 h-4 rounded-full bg-[#215dc6] flex items-center justify-center text-white"><ChevronLeft size={10} className="-rotate-90" /></div>
+            </div>
+            <div className="bg-[#d6dff7] p-3 space-y-1 text-[#215dc6] text-[10px]">
+              <p className="font-bold text-sm mb-1 truncate">{currentFolder.name}</p>
+              <p>Tipo: Carpeta de Google</p>
+              <p>Elementos: {files.length}</p>
+              {user && <div className="mt-2 pt-2 border-t border-blue-300 italic flex items-center gap-2">
+                <img src={user.picture} className="w-4 h-4 rounded-full" alt="" />
+                <span className="truncate">{user.name}</span>
+              </div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Rejilla de archivos */}
+        <div className="flex-1 bg-white overflow-y-auto p-4 border-l border-gray-400 shadow-inner">
+          
+          {error && (
+            <div className="bg-[#ffffcc] border border-[#e6db55] p-3 rounded flex items-start gap-3 mb-4 text-[#333] shadow-md animate-in fade-in slide-in-from-top-2">
+               <AlertTriangle className="text-orange-500 flex-shrink-0" size={24} />
+               <div>
+                  <p className="font-bold">Aviso del sistema:</p>
+                  <p className="text-xs">{error}</p>
+                  <button onClick={() => setError(null)} className="mt-1 text-blue-600 underline text-xs">Cerrar</button>
+               </div>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-400">
+              <div className="animate-bounce mb-2">
+                <Folder size={64} className="text-yellow-400 fill-yellow-100" />
+              </div>
+              <p className="italic animate-pulse">Obteniendo datos de Google Drive...</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-x-4 gap-y-6">
+              {files.length === 0 ? (
+                <div className="col-span-full flex flex-col items-center py-20 text-gray-400 italic opacity-50">
+                   <Search size={64} className="mb-2" />
+                   <p>No hay archivos que mostrar aquí.</p>
+                </div>
+              ) : (
+                files.map((file) => (
+                  <div 
+                    key={file.id} 
+                    className="flex flex-col items-center gap-1 group cursor-pointer p-2 rounded hover:bg-[#316ac5] border border-transparent hover:border-[#316ac5] text-center transition-all duration-75"
+                    onDoubleClick={() => {
+                      if (file.mimeType === 'application/vnd.google-apps.folder') {
+                        navigateTo({ id: file.id, name: file.name });
+                      } else {
+                        window.open(`https://drive.google.com/file/d/${file.id}/view`, '_blank');
+                      }
+                    }}
+                  >
+                    <div className="relative mb-1">
+                      {file.mimeType === 'application/vnd.google-apps.folder' ? (
+                        <Folder size={48} className="text-[#f7d774] fill-[#f7d774] drop-shadow-sm group-hover:fill-yellow-200 transition-colors" />
+                      ) : file.mimeType.startsWith('image/') ? (
+                        <div className="w-12 h-12 bg-white border border-gray-300 p-0.5 shadow-sm flex items-center justify-center overflow-hidden">
+                           <ImageIcon size={32} className="text-blue-400" />
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <FileText size={48} className="text-gray-300 fill-white drop-shadow-sm" />
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                             <span className="text-[8px] font-bold text-gray-400 uppercase mt-2">DOC</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs break-all line-clamp-2 px-1 group-hover:text-white leading-tight font-medium">
+                      {file.name}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Barra de tareas azul clásica */}
+      <div className="h-8 bg-gradient-to-b from-[#245edb] via-[#3f8cf3] to-[#245edb] flex items-center justify-between px-0 border-t border-white/20 flex-shrink-0">
+        <div className="flex items-center h-full">
+          {/* Botón de Inicio */}
+          <button className="h-full px-4 flex items-center gap-2 bg-gradient-to-b from-[#388e3c] via-[#4caf50] to-[#388e3c] rounded-r-xl italic font-black text-white text-lg shadow-[inset_1px_1px_rgba(255,255,255,0.4),2px_0_4px_rgba(0,0,0,0.3)] hover:brightness-110 mr-2 border-r border-black/20 transition-all active:scale-95 origin-left">
+             <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center overflow-hidden flex-wrap">
+               <div className="w-2.5 h-2.5 bg-red-500"></div>
+               <div className="w-2.5 h-2.5 bg-green-500"></div>
+               <div className="w-2.5 h-2.5 bg-blue-500"></div>
+               <div className="w-2.5 h-2.5 bg-yellow-500"></div>
+             </div>
+             Inicio
+          </button>
+          
+          {/* Ventana Activa */}
+          <div className="h-7 bg-[#1e52c4] border-x border-[#1a44a0] px-4 flex items-center gap-2 text-white text-xs max-w-[200px] shadow-[inset_1px_1px_rgba(0,0,0,0.2)] rounded-sm my-0.5 mx-1">
+             <Folder size={14} className="text-yellow-500 fill-yellow-500 flex-shrink-0" />
+             <span className="truncate">{currentFolder.name}</span>
+          </div>
+        </div>
+
+        {/* Área de Notificación */}
+        <div className="h-full bg-[#0997ff] px-3 flex items-center gap-3 border-l border-white/20 shadow-[inset_2px_0_4px_rgba(0,0,0,0.2)]">
+           <div className="flex gap-2">
+             {loading && <RefreshCw size={14} className="text-white animate-spin opacity-80" />}
+             {user && <img src={user.picture} className="w-4 h-4 rounded-full border border-white/40 shadow-sm" title={user.name} alt="u" />}
+           </div>
+           <div className="text-white font-bold text-[11px] min-w-[60px] text-center tracking-tight">
+             {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
