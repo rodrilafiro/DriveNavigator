@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.23</title>
+    <title>DriveNavigator XP - v1.24</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -25,7 +25,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         const CLIENT_ID = "483723699126-qnf9lr8p8c9cnud19lkceiv92022c1rs.apps.googleusercontent.com";
         const SCOPES = "https://www.googleapis.com/auth/drive";
@@ -50,6 +50,7 @@
             const [contextMenu, setContextMenu] = useState(null);
             const [viewMode, setViewMode] = useState('medium');
             const [driveInfo, setDriveInfo] = useState({ limit: 0, usage: 0 });
+            const fileInputRef = useRef(null);
 
             useEffect(() => {
                 const scriptGis = document.createElement('script');
@@ -124,10 +125,7 @@
                     try {
                         await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}`, {
                             method: 'PATCH',
-                            headers: { 
-                                Authorization: `Bearer ${accessToken}`,
-                                'Content-Type': 'application/json'
-                            },
+                            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
                             body: JSON.stringify({ name: newName })
                         });
                         fetchFiles(currentFolder.id);
@@ -140,11 +138,8 @@
                 if (confirm(`¿Está seguro de que desea enviar "${file.name}" a la papelera?`)) {
                     try {
                         await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}`, {
-                            method: 'PATCH', // Usamos PATCH para mandarlo a la papelera (trashed: true)
-                            headers: { 
-                                Authorization: `Bearer ${accessToken}`,
-                                'Content-Type': 'application/json'
-                            },
+                            method: 'PATCH',
+                            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
                             body: JSON.stringify({ trashed: true })
                         });
                         fetchFiles(currentFolder.id);
@@ -154,21 +149,59 @@
                 setContextMenu(null);
             };
 
-            const handleSelect = (id, e) => {
-                e.stopPropagation();
-                setContextMenu(null);
-                if (e.ctrlKey) {
-                    setSelectedFiles(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-                } else {
-                    setSelectedFiles([id]);
+            const handleCreateFolder = async () => {
+                const folderName = prompt("Nombre de la nueva carpeta:", "Nueva Carpeta");
+                if (folderName) {
+                    try {
+                        await fetch('https://www.googleapis.com/drive/v3/files', {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: folderName,
+                                mimeType: 'application/vnd.google-apps.folder',
+                                parents: [currentFolder.id]
+                            })
+                        });
+                        fetchFiles(currentFolder.id);
+                    } catch (e) { alert("Error al crear carpeta"); }
                 }
+                setContextMenu(null);
             };
 
-            const handleContextMenu = (e, file) => {
+            const handleUploadFile = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const metadata = {
+                    name: file.name,
+                    parents: [currentFolder.id]
+                };
+
+                const formData = new FormData();
+                formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                formData.append('file', file);
+
+                try {
+                    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${accessToken}` },
+                        body: formData
+                    });
+                    fetchFiles(currentFolder.id);
+                } catch (e) { alert("Error al subir archivo"); }
+                setContextMenu(null);
+            };
+
+            const handleContextMenu = (e, file = null) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (!selectedFiles.includes(file.id)) setSelectedFiles([file.id]);
-                setContextMenu({ x: e.pageX, y: e.pageY, file });
+                if (file) {
+                    if (!selectedFiles.includes(file.id)) setSelectedFiles([file.id]);
+                    setContextMenu({ x: e.pageX, y: e.pageY, file, type: 'file' });
+                } else {
+                    setSelectedFiles([]);
+                    setContextMenu({ x: e.pageX, y: e.pageY, type: 'bg' });
+                }
             };
 
             const FolderItem = ({ folder, level = 0 }) => (
@@ -199,6 +232,8 @@
 
             return (
                 <div className="h-full w-full flex flex-col font-sans text-xs bg-[#ece9d8]" onClick={() => {setSelectedFiles([]); setContextMenu(null);}}>
+                    <input type="file" ref={fileInputRef} className="hidden" onChange={handleUploadFile} />
+                    
                     <div className="h-8 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold flex-shrink-0">
                         <div className="flex items-center gap-2"><span>📂 {currentFolder.name}</span></div>
                         <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-6 border border-white/50 rounded-sm font-bold shadow-md">X</button>
@@ -215,11 +250,11 @@
                             <FolderItem folder={{ id: 'root', name: 'Mi unidad' }} />
                         </div>
 
-                        <div className="flex-1 bg-white overflow-y-auto p-4 relative">
+                        <div className="flex-1 bg-white overflow-y-auto p-4 relative" onContextMenu={(e) => handleContextMenu(e)}>
                             <div className={viewMode === 'details' ? 'flex flex-col' : 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-6'}>
                                 {files.map(f => (
                                     <div key={f.id} 
-                                         onClick={(e) => handleSelect(f.id, e)}
+                                         onClick={(e) => {e.stopPropagation(); setContextMenu(null); if (e.ctrlKey) {setSelectedFiles(prev => prev.includes(f.id) ? prev.filter(i => i !== f.id) : [...prev, f.id]);} else {setSelectedFiles([f.id]);}}}
                                          onContextMenu={(e) => handleContextMenu(e, f)}
                                          onDoubleClick={() => handleOpen(f)}
                                          className={`flex cursor-pointer items-center p-2 rounded transition-all ${selectedFiles.includes(f.id) ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-100'} ${viewMode === 'medium' ? 'flex-col text-center' : 'flex-row gap-4 border-b w-full'}`}>
@@ -230,11 +265,22 @@
                             </div>
 
                             {contextMenu && (
-                                <div className="xp-context-menu fixed w-48 py-1" style={{ top: contextMenu.y, left: contextMenu.x }}>
-                                    <div className="xp-context-item px-4 py-1 cursor-default font-bold" onClick={() => handleOpen(contextMenu.file)}>Abrir</div>
-                                    <div className="border-b my-1 border-gray-300"></div>
-                                    <div className="xp-context-item px-4 py-1 cursor-default" onClick={() => handleRename(contextMenu.file)}>Renombrar</div>
-                                    <div className="xp-context-item px-4 py-1 cursor-default text-red-600" onClick={() => handleDelete(contextMenu.file)}>Eliminar</div>
+                                <div className="xp-context-menu fixed w-48 py-1" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
+                                    {contextMenu.type === 'file' ? (
+                                        <>
+                                            <div className="xp-context-item px-4 py-1 cursor-default font-bold" onClick={() => handleOpen(contextMenu.file)}>Abrir</div>
+                                            <div className="border-b my-1 border-gray-300"></div>
+                                            <div className="xp-context-item px-4 py-1 cursor-default" onClick={() => handleRename(contextMenu.file)}>Renombrar</div>
+                                            <div className="xp-context-item px-4 py-1 cursor-default text-red-600" onClick={() => handleDelete(contextMenu.file)}>Eliminar</div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="xp-context-item px-4 py-1 cursor-default" onClick={handleCreateFolder}>Nueva Carpeta</div>
+                                            <div className="xp-context-item px-4 py-1 cursor-default" onClick={() => fileInputRef.current.click()}>Subir Archivo</div>
+                                            <div className="border-b my-1 border-gray-300"></div>
+                                            <div className="xp-context-item px-4 py-1 cursor-default opacity-50">Pegar</div>
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>
