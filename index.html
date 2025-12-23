@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.22</title>
+    <title>DriveNavigator XP - v1.23</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -25,7 +25,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useCallback } = React;
+        const { useState, useEffect } = React;
 
         const CLIENT_ID = "483723699126-qnf9lr8p8c9cnud19lkceiv92022c1rs.apps.googleusercontent.com";
         const SCOPES = "https://www.googleapis.com/auth/drive";
@@ -118,6 +118,42 @@
                 setContextMenu(null);
             };
 
+            const handleRename = async (file) => {
+                const newName = prompt(`Cambiar nombre a "${file.name}":`, file.name);
+                if (newName && newName !== file.name) {
+                    try {
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}`, {
+                            method: 'PATCH',
+                            headers: { 
+                                Authorization: `Bearer ${accessToken}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ name: newName })
+                        });
+                        fetchFiles(currentFolder.id);
+                    } catch (e) { alert("Error al renombrar"); }
+                }
+                setContextMenu(null);
+            };
+
+            const handleDelete = async (file) => {
+                if (confirm(`¿Está seguro de que desea enviar "${file.name}" a la papelera?`)) {
+                    try {
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}`, {
+                            method: 'PATCH', // Usamos PATCH para mandarlo a la papelera (trashed: true)
+                            headers: { 
+                                Authorization: `Bearer ${accessToken}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ trashed: true })
+                        });
+                        fetchFiles(currentFolder.id);
+                        setSelectedFiles([]);
+                    } catch (e) { alert("Error al eliminar"); }
+                }
+                setContextMenu(null);
+            };
+
             const handleSelect = (id, e) => {
                 e.stopPropagation();
                 setContextMenu(null);
@@ -163,19 +199,16 @@
 
             return (
                 <div className="h-full w-full flex flex-col font-sans text-xs bg-[#ece9d8]" onClick={() => {setSelectedFiles([]); setContextMenu(null);}}>
-                    {/* Barra de Título */}
                     <div className="h-8 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold flex-shrink-0">
                         <div className="flex items-center gap-2"><span>📂 {currentFolder.name}</span></div>
                         <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-6 border border-white/50 rounded-sm font-bold shadow-md">X</button>
                     </div>
 
-                    {/* Barra de Herramientas */}
                     <div className="bg-[#ece9d8] border-b border-gray-400 p-1 flex gap-2 flex-shrink-0">
                         <button onClick={(e) => {e.stopPropagation(); setViewMode('medium');}} className={`px-3 py-1 border border-gray-400 rounded-sm ${viewMode === 'medium' ? 'bg-white shadow-inner' : 'bg-gray-100'}`}>Iconos</button>
                         <button onClick={(e) => {e.stopPropagation(); setViewMode('details');}} className={`px-3 py-1 border border-gray-400 rounded-sm ${viewMode === 'details' ? 'bg-white shadow-inner' : 'bg-gray-100'}`}>Detalles</button>
                     </div>
 
-                    {/* Área Principal */}
                     <div className="flex-1 flex overflow-hidden">
                         <div className="w-64 bg-white border-r border-gray-400 overflow-y-auto flex flex-col shadow-inner">
                             <div className="p-2 bg-gradient-to-r from-[#eff3ff] to-[#ccd9ff] font-bold text-[#215dc6] border-b">Carpetas</div>
@@ -196,13 +229,12 @@
                                 ))}
                             </div>
 
-                            {/* Menú de Contexto Corregido v1.22 */}
                             {contextMenu && (
                                 <div className="xp-context-menu fixed w-48 py-1" style={{ top: contextMenu.y, left: contextMenu.x }}>
                                     <div className="xp-context-item px-4 py-1 cursor-default font-bold" onClick={() => handleOpen(contextMenu.file)}>Abrir</div>
                                     <div className="border-b my-1 border-gray-300"></div>
-                                    <div className="xp-context-item px-4 py-1 cursor-default" onClick={() => alert('Renombrar: Próximamente')}>Renombrar</div>
-                                    <div className="xp-context-item px-4 py-1 cursor-default text-red-600" onClick={() => alert('Eliminar: Próximamente')}>Eliminar</div>
+                                    <div className="xp-context-item px-4 py-1 cursor-default" onClick={() => handleRename(contextMenu.file)}>Renombrar</div>
+                                    <div className="xp-context-item px-4 py-1 cursor-default text-red-600" onClick={() => handleDelete(contextMenu.file)}>Eliminar</div>
                                 </div>
                             )}
                         </div>
