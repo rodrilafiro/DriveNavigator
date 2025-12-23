@@ -3,26 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.1 Fix</title>
+    <title>DriveNavigator XP - v1.1 Estable</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         html, body, #root {
-            height: 100%;
+            height: 100vh;
+            width: 100vw;
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background-color: #003399; /* Azul XP de fondo por si falla algo */
+            background-color: #003399; /* Azul XP */
+        }
+        /* Animación simple para que sepa que está cargando */
+        .loading-text {
+            color: white;
+            font-family: sans-serif;
+            text-align: center;
+            margin-top: 45vh;
         }
     </style>
 </head>
 <body>
-    <div id="root"></div>
+    <div id="root">
+        <div class="loading-text">Iniciando Windows XP...</div>
+    </div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         const CLIENT_ID = "483723699126-qnf9lr8p8c9cnud19lkceiv92022c1rs.apps.googleusercontent.com";
         const SCOPES = "https://www.googleapis.com/auth/drive";
@@ -42,30 +52,21 @@
             const [accessToken, setAccessToken] = useState(null);
             const [files, setFiles] = useState([]);
             const [currentFolder, setCurrentFolder] = useState({ id: 'root', name: 'Mi unidad' });
-            const [expandedFolders, setExpandedFolders] = useState({});
             const [viewMode, setViewMode] = useState('medium');
             const [driveInfo, setDriveInfo] = useState({ limit: 0, usage: 0 });
 
             useEffect(() => {
-                // Función para inicializar Google Identity Services
-                const initGis = () => {
-                    if (window.google) {
-                        const client = window.google.accounts.oauth2.initTokenClient({
-                            client_id: CLIENT_ID,
-                            scope: SCOPES,
-                            callback: (resp) => {
-                                if (resp.access_token) setAccessToken(resp.access_token);
-                            },
-                        });
-                        setTokenClient(client);
-                    }
-                };
-
-                // Carga manual de scripts para asegurar orden
                 const scriptGis = document.createElement('script');
                 scriptGis.src = "https://accounts.google.com/gsi/client";
                 scriptGis.async = true;
-                scriptGis.onload = initGis;
+                scriptGis.onload = () => {
+                    const client = window.google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: SCOPES,
+                        callback: (resp) => { if (resp.access_token) setAccessToken(resp.access_token); },
+                    });
+                    setTokenClient(client);
+                };
                 document.head.appendChild(scriptGis);
 
                 const scriptGapi = document.createElement('script');
@@ -97,41 +98,11 @@
                         limit: quotaData.storageQuota.limit || 0,
                         usage: quotaData.storageQuota.usage || 0
                     });
-                } catch (e) {
-                    console.error("Error cargando archivos:", e);
-                }
+                } catch (e) { console.error(e); }
             };
 
             useEffect(() => { if (accessToken) fetchFiles(currentFolder.id); }, [accessToken, currentFolder.id]);
 
             if (!accessToken) return (
-                <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans text-center px-4">
-                    <h1 className="text-5xl md:text-7xl font-bold italic mb-4 drop-shadow-md">Windows<span className="text-orange-500">xp</span></h1>
-                    <p className="text-xl opacity-70 mb-10">Workspace Drive Edition</p>
-                    <button 
-                        onClick={() => tokenClient && tokenClient.requestAccessToken()} 
-                        className="bg-white/10 p-5 border-2 border-white/30 rounded-2xl hover:bg-white/20 transition-all flex items-center gap-4 active:scale-95"
-                    >
-                        <div className="w-12 h-12 bg-blue-600 rounded-lg border border-white/50 flex items-center justify-center text-2xl">👤</div>
-                        <span className="text-xl font-bold">Iniciar Sesión con Google</span>
-                    </button>
-                </div>
-            );
-
-            const FolderItem = ({ folder, level = 0 }) => (
-                <div key={folder.id}>
-                    <div 
-                        className={`flex items-center gap-1 p-1 cursor-pointer hover:bg-blue-100 ${currentFolder.id === folder.id ? 'bg-[#316ac5] text-white' : 'text-black'}`}
-                        style={{ paddingLeft: `${level * 12 + 4}px` }}
-                        onClick={() => setCurrentFolder({ id: folder.id, name: folder.name })}
-                    >
-                        <span>📁</span>
-                        <span className="truncate">{folder.name}</span>
-                    </div>
-                </div>
-            );
-
-            return (
-                <div className="h-full w-full flex flex-col font-sans text-xs bg-[#ece9d8]">
-                    {/* Barra de Título */}
-                    <div className="h-8 bg-gradient-to-b from-[#0058e6] via-[#3b89ff] to-[#0058e6] flex items-center justify-between px-2 text-white font-bold
+                <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans overflow-hidden">
+                    <h1 className="text-6xl italic font-bold mb-4 drop-
