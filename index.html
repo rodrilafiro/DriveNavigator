@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.53 (Restored & Enhanced)</title>
+    <title>DriveNavigator XP - v1.54 (Clipboard Pro)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -36,9 +36,10 @@
             const [expandedFolders, setExpandedFolders] = useState({});
             const [selectedFileId, setSelectedFileId] = useState(null);
             const [contextMenu, setContextMenu] = useState(null);
-            const [viewMode, setViewMode] = useState('details');
             const [searchQuery, setSearchQuery] = useState("");
             const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+            // Estado del Portapapeles v1.54
+            const [clipboard, setClipboard] = useState({ fileId: null, action: null }); 
             const fileInputRef = useRef(null);
 
             const getIcon = (f) => {
@@ -64,7 +65,7 @@
             const fetchFiles = async (folderId) => {
                 if (!accessToken) return;
                 try {
-                    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, size, modifiedTime, webViewLink)&pageSize=100`, {
+                    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, size, modifiedTime, webViewLink, parents)&pageSize=100`, {
                         headers: { Authorization: `Bearer ${accessToken}` }
                     });
                     const data = await res.json();
@@ -86,12 +87,41 @@
             useEffect(() => { if (accessToken) fetchFiles(currentFolder.id); }, [accessToken, currentFolder.id]);
 
             const apiCall = async (url, method, body) => {
-                await fetch(url, {
+                const res = await fetch(url, {
                     method, headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
                     body: body ? JSON.stringify(body) : undefined
                 });
                 fetchFiles(currentFolder.id);
                 setContextMenu(null);
+                return res.json();
+            };
+
+            // LÓGICA PORTAPAPELES v1.54
+            const handlePaste = async () => {
+                if (!clipboard.fileId) return;
+                try {
+                    if (clipboard.action === 'copy') {
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${clipboard.fileId}/copy`, {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ parents: [currentFolder.id] })
+                        });
+                    } else if (clipboard.action === 'cut') {
+                        // Para mover, primero obtenemos los padres actuales
+                        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files/${clipboard.fileId}?fields=parents`, {
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+                        const fileData = await fileRes.json();
+                        const previousParents = fileData.parents.join(',');
+                        
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${clipboard.fileId}?addParents=${currentFolder.id}&removeParents=${previousParents}`, {
+                            method: 'PATCH',
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+                    }
+                    setClipboard({ fileId: null, action: null });
+                    fetchFiles(currentFolder.id);
+                } catch (e) { alert("Error en la operación de pegado"); }
             };
 
             const sortedFiles = useMemo(() => {
@@ -119,9 +149,9 @@
             );
 
             if (!accessToken) return (
-                <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans">
+                <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans text-center">
                     <h1 className="text-6xl font-bold italic mb-8">Windows<span className="text-orange-500">xp</span></h1>
-                    <button onClick={() => tokenClient.requestAccessToken()} className="bg-white/10 p-4 border border-white/20 rounded hover:bg-white/20">👤 Iniciar Sesión en Drive</button>
+                    <button onClick={() => tokenClient.requestAccessToken()} className="bg-white/10 p-4 border border-white/20 rounded hover:bg-white/20 active:scale-95 transition-all">👤 Entrar a Drive Navigator</button>
                 </div>
             );
 
@@ -137,27 +167,25 @@
                     }} />
 
                     <div className="h-7 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold">
-                        <span>📂 {currentFolder.name} - DriveNavigator v1.53</span>
+                        <span>📂 {currentFolder.name} - Explorador v1.54</span>
                         <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-5 rounded-sm">X</button>
                     </div>
 
                     <div className="p-1 border-b border-gray-400 flex gap-2 bg-[#ece9d8]">
-                        <button onClick={(e) => {e.stopPropagation(); fileInputRef.current.click()}} className="px-2 border border-gray-400 bg-gray-100 hover:bg-white">Subir</button>
+                        <button onClick={(e) => {e.stopPropagation(); fileInputRef.current.click()}} className="px-2 border border-gray-400 bg-gray-100">Subir</button>
                         <div className="flex-1 bg-white border border-gray-300 px-2 flex items-center">
-                            <span className="text-gray-400 mr-2">Buscar:</span>
+                            <span className="text-gray-400 mr-2 italic">Filtro:</span>
                             <input type="text" className="w-full outline-none" value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} onClick={(e)=>e.stopPropagation()} />
                         </div>
                     </div>
 
                     <div className="flex-1 flex overflow-hidden">
-                        {/* Panel Izquierdo: Árbol */}
-                        <div className="w-48 bg-white border-r border-gray-400 overflow-y-auto" onClick={(e)=>e.stopPropagation()}>
+                        <div className="w-48 bg-white border-r border-gray-400 overflow-y-auto">
                             <div className="p-1 bg-[#f1f1f1] font-bold border-b text-blue-800">CARPETAS</div>
                             <FolderTree folder={{id: 'root', name: 'Mi unidad'}} />
                         </div>
 
-                        {/* Centro: Archivos */}
-                        <div className="flex-1 bg-white overflow-y-auto relative" onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setContextMenu({x: e.pageX, y: e.pageY, type: 'bg'});}}>
+                        <div className="flex-1 bg-white overflow-y-auto relative shadow-inner" onContextMenu={(e) => {e.preventDefault(); e.stopPropagation(); setContextMenu({x: e.pageX, y: e.pageY, type: 'bg'});}}>
                             <table className="w-full text-left border-collapse">
                                 <thead className="sticky top-0 bg-gray-100 z-10 shadow-sm">
                                     <tr>
@@ -173,8 +201,8 @@
                                             onDoubleClick={() => f.mimeType.includes('folder')?setCurrentFolder({id:f.id, name:f.name}):window.open(f.webViewLink)}
                                             className={`cursor-pointer ${selectedFileId === f.id ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-50'}`}>
                                             <td className="p-1 truncate">{getIcon(f)} {f.name}</td>
-                                            <td className="p-1 opacity-60">{f.size?(f.size/1024).toFixed(1)+'KB':'--'}</td>
-                                            <td className="p-1 opacity-60">{new Date(f.modifiedTime).toLocaleDateString()}</td>
+                                            <td className="p-1 opacity-60 font-mono text-[9px]">{f.size?(f.size/1024).toFixed(1)+'KB':'--'}</td>
+                                            <td className="p-1 opacity-60 font-mono text-[9px]">{new Date(f.modifiedTime).toLocaleDateString()}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -185,47 +213,51 @@
                                     {contextMenu.type === 'file' ? (
                                         <>
                                             <div className="xp-context-item px-4 py-1" onClick={() => window.open(contextMenu.f.webViewLink)}>Abrir</div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nuevo nombre:", contextMenu.f.name); if(n) apiCall(`https://www.googleapis.com/drive/v3/files/${contextMenu.f.id}`, 'PATCH', {name: n});}}>Renombrar</div>
+                                            <div className="xp-context-item px-4 py-1" onClick={() => setClipboard({fileId: contextMenu.f.id, action: 'copy'})}>Copiar</div>
+                                            <div className="xp-context-item px-4 py-1" onClick={() => setClipboard({fileId: contextMenu.f.id, action: 'cut'})}>Cortar</div>
+                                            <div className="border-b my-1 border-gray-300"></div>
                                             <div className="xp-context-item px-4 py-1 text-red-600" onClick={() => {if(confirm("¿Eliminar?")) apiCall(`https://www.googleapis.com/drive/v3/files/${contextMenu.f.id}`, 'PATCH', {trashed: true});}}>Eliminar</div>
                                         </>
                                     ) : (
                                         <>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nombre carpeta:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.folder', parents:[currentFolder.id]});}}>Nueva Carpeta</div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nombre Doc:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.document', parents:[currentFolder.id]});}}>Nuevo Google Doc</div>
-                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nombre Sheet:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.spreadsheet', parents:[currentFolder.id]});}}>Nueva Hoja Cálculo</div>
+                                            {clipboard.fileId && <div className="xp-context-item px-4 py-1 font-bold bg-blue-50" onClick={handlePaste}>📋 Pegar archivo</div>}
+                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Nombre:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.folder', parents:[currentFolder.id]});}}>Nueva Carpeta</div>
+                                            <div className="xp-context-item px-4 py-1" onClick={() => {const n = prompt("Doc:"); if(n) apiCall('https://www.googleapis.com/drive/v3/files', 'POST', {name:n, mimeType:'application/vnd.google-apps.document', parents:[currentFolder.id]});}}>Nuevo Google Doc</div>
                                         </>
                                     )}
                                 </div>
                             )}
                         </div>
 
-                        {/* Panel Derecho: Acciones (v1.53) */}
+                        {/* PANEL DERECHO ACCIONES REALES v1.54 */}
                         <div className="w-56 preview-pane p-2 overflow-y-auto" onClick={(e)=>e.stopPropagation()}>
                             {selectedFile ? (
                                 <>
                                     <div className="xp-panel-header">Tareas de archivo</div>
-                                    <div className="xp-panel-body flex flex-col gap-1">
-                                        <button onClick={() => window.open(selectedFile.webViewLink)} className="text-left hover:underline text-blue-800">▶ Abrir archivo</button>
-                                        <button onClick={() => alert("Copiado al portapapeles (Simulado)")} className="text-left hover:underline text-blue-800">📋 Copiar este archivo</button>
-                                        <button onClick={() => alert("Cortado (Simulado)")} className="text-left hover:underline text-blue-800">✂️ Cortar este archivo</button>
-                                        <button onClick={() => {if(confirm("¿Borrar?")) apiCall(`https://www.googleapis.com/drive/v3/files/${selectedFile.id}`, 'PATCH', {trashed: true});}} className="text-left hover:underline text-red-700">🗑️ Eliminar archivo</button>
+                                    <div className="xp-panel-body flex flex-col gap-1 shadow-sm">
+                                        <button onClick={() => window.open(selectedFile.webViewLink)} className="text-left hover:underline text-blue-800">▶ Abrir</button>
+                                        <button onClick={() => {setClipboard({fileId: selectedFile.id, action: 'copy'}); alert("Copiado al portapapeles")}} className="text-left hover:underline text-blue-800">📋 Copiar</button>
+                                        <button onClick={() => {setClipboard({fileId: selectedFile.id, action: 'cut'}); alert("Cortado")}} className="text-left hover:underline text-blue-800">✂️ Cortar</button>
+                                        <button onClick={() => {if(confirm("¿Borrar?")) apiCall(`https://www.googleapis.com/drive/v3/files/${selectedFile.id}`, 'PATCH', {trashed: true});}} className="text-left hover:underline text-red-700">🗑️ Eliminar</button>
                                     </div>
-
                                     <div className="xp-panel-header">Detalles</div>
-                                    <div className="xp-panel-body text-[10px]">
-                                        <p><b>Nombre:</b> {selectedFile.name}</p>
-                                        <p><b>Tipo:</b> {selectedFile.mimeType.split('.').pop()}</p>
-                                        <p><b>Modificado:</b> {new Date(selectedFile.modifiedTime).toLocaleString()}</p>
+                                    <div className="xp-panel-body text-[10px] bg-white/20">
+                                        <p className="break-words"><b>Nombre:</b> {selectedFile.name}</p>
+                                        <p><b>Modificado:</b> {new Date(selectedFile.modifiedTime).toLocaleDateString()}</p>
                                     </div>
                                 </>
                             ) : (
-                                <div className="text-center mt-10 opacity-40">Seleccione un archivo para ver acciones</div>
+                                <div className="p-4 space-y-4">
+                                    {clipboard.fileId && (
+                                        <div className="bg-white p-2 border-2 border-blue-500 rounded shadow animate-pulse">
+                                            <p className="font-bold text-blue-600 mb-2">Contenido listo:</p>
+                                            <button onClick={handlePaste} className="w-full bg-blue-600 text-white py-1 rounded">📋 Pegar aquí</button>
+                                        </div>
+                                    )}
+                                    <div className="text-center opacity-40 italic">Seleccione un archivo para ver acciones</div>
+                                </div>
                             )}
                         </div>
-                    </div>
-
-                    <div className="h-6 bg-[#ece9d8] border-t border-gray-400 flex items-center px-3 text-gray-700">
-                        {files.length} objetos en esta carpeta
                     </div>
                 </div>
             );
