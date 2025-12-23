@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.21</title>
+    <title>DriveNavigator XP - v1.22</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -108,6 +108,16 @@
 
             useEffect(() => { if (accessToken) fetchFiles(currentFolder.id); }, [accessToken, currentFolder.id]);
 
+            const handleOpen = (file) => {
+                if (file.mimeType === 'application/vnd.google-apps.folder') {
+                    setCurrentFolder({ id: file.id, name: file.name });
+                    setSelectedFiles([]);
+                } else {
+                    window.open(`https://drive.google.com/file/d/${file.id}/view`, '_blank');
+                }
+                setContextMenu(null);
+            };
+
             const handleSelect = (id, e) => {
                 e.stopPropagation();
                 setContextMenu(null);
@@ -145,7 +155,7 @@
                 <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans">
                     <h1 className="text-6xl font-bold italic mb-10">Windows<span className="text-[#ff8a00]">xp</span></h1>
                     <div onClick={() => tokenClient && tokenClient.requestAccessToken()} className="flex items-center gap-4 p-2 bg-white/10 border border-white/20 rounded-lg cursor-pointer hover:bg-white/20 transition-all shadow-xl">
-                        <div className="w-16 h-16 bg-blue-600 rounded border-2 border-white/50 flex items-center justify-center text-4xl">👤</div>
+                        <div className="w-16 h-16 bg-blue-600 rounded border-2 border-white/50 flex items-center justify-center text-4xl shadow-inner">👤</div>
                         <div className="text-left"><p className="text-2xl font-bold">Workspace User</p><p className="text-blue-200 text-sm">Conectar Drive</p></div>
                     </div>
                 </div>
@@ -167,20 +177,18 @@
 
                     {/* Área Principal */}
                     <div className="flex-1 flex overflow-hidden">
-                        {/* Menú Izquierdo (Árbol) */}
                         <div className="w-64 bg-white border-r border-gray-400 overflow-y-auto flex flex-col shadow-inner">
                             <div className="p-2 bg-gradient-to-r from-[#eff3ff] to-[#ccd9ff] font-bold text-[#215dc6] border-b">Carpetas</div>
                             <FolderItem folder={{ id: 'root', name: 'Mi unidad' }} />
                         </div>
 
-                        {/* Visualizador de Archivos */}
                         <div className="flex-1 bg-white overflow-y-auto p-4 relative">
                             <div className={viewMode === 'details' ? 'flex flex-col' : 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-6'}>
                                 {files.map(f => (
                                     <div key={f.id} 
                                          onClick={(e) => handleSelect(f.id, e)}
                                          onContextMenu={(e) => handleContextMenu(e, f)}
-                                         onDoubleClick={() => f.mimeType.includes('folder') ? setCurrentFolder({id: f.id, name: f.name}) : window.open(`https://drive.google.com/file/d/${f.id}/view`)}
+                                         onDoubleClick={() => handleOpen(f)}
                                          className={`flex cursor-pointer items-center p-2 rounded transition-all ${selectedFiles.includes(f.id) ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-100'} ${viewMode === 'medium' ? 'flex-col text-center' : 'flex-row gap-4 border-b w-full'}`}>
                                         <span className={viewMode === 'medium' ? 'text-4xl' : 'text-xl'}>{getFileIcon(f.mimeType, f.name)}</span>
                                         <span className="truncate w-full font-medium">{f.name}</span>
@@ -188,10 +196,10 @@
                                 ))}
                             </div>
 
-                            {/* Menú de Contexto flotante */}
+                            {/* Menú de Contexto Corregido v1.22 */}
                             {contextMenu && (
                                 <div className="xp-context-menu fixed w-48 py-1" style={{ top: contextMenu.y, left: contextMenu.x }}>
-                                    <div className="xp-context-item px-4 py-1 cursor-default font-bold" onClick={() => window.open(`https://drive.google.com/file/d/${contextMenu.file.id}/view`)}>Abrir</div>
+                                    <div className="xp-context-item px-4 py-1 cursor-default font-bold" onClick={() => handleOpen(contextMenu.file)}>Abrir</div>
                                     <div className="border-b my-1 border-gray-300"></div>
                                     <div className="xp-context-item px-4 py-1 cursor-default" onClick={() => alert('Renombrar: Próximamente')}>Renombrar</div>
                                     <div className="xp-context-item px-4 py-1 cursor-default text-red-600" onClick={() => alert('Eliminar: Próximamente')}>Eliminar</div>
@@ -200,15 +208,11 @@
                         </div>
                     </div>
 
-                    {/* Barra de Estado */}
                     <div className="h-6 bg-[#ece9d8] border-t border-gray-400 flex items-center justify-between px-3 text-[10px] text-gray-700 flex-shrink-0 font-medium">
                         <div>{files.length} objetos | {selectedFiles.length} seleccionados</div>
-                        <div className="flex gap-4">
-                            <span>Uso: {(driveInfo.usage / 1e9).toFixed(2)} GB / {(driveInfo.limit / 1e9).toFixed(0)} GB</span>
-                        </div>
+                        <div>Uso: {(driveInfo.usage / 1e9).toFixed(2)} GB / {(driveInfo.limit / 1e9).toFixed(0)} GB</div>
                     </div>
 
-                    {/* Barra de Tareas */}
                     <div className="h-8 xp-taskbar flex items-center justify-between px-0 flex-shrink-0 border-t border-white/30">
                         <div className="bg-green-600 px-6 h-full flex items-center text-white italic font-black text-lg rounded-r-2xl shadow-lg border-r border-black/20 cursor-pointer">Inicio</div>
                         <div className="bg-[#0997ff] px-4 h-full flex items-center text-white font-bold shadow-inner">
