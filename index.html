@@ -4,58 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DriveNavigator XP - v1.1 Estable</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        html, body, #root {
-            height: 100vh;
-            width: 100vw;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #003399; /* Azul XP */
-        }
-        /* Animación simple para que sepa que está cargando */
-        .loading-text {
-            color: white;
-            font-family: sans-serif;
-            text-align: center;
-            margin-top: 45vh;
-        }
+        html, body, #root { height: 100vh; width: 100vw; margin: 0; padding: 0; overflow: hidden; background-color: #003399; }
+        .loading-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: white; font-family: 'Tahoma', sans-serif; }
+        .xp-logo { font-style: italic; font-weight: bold; font-size: 4rem; margin-bottom: 20px; }
+        .xp-orange { color: #ff8a00; font-size: 2rem; vertical-align: top; }
+        .loader-bar { width: 150px; height: 10px; border: 1px solid #aaa; position: relative; overflow: hidden; }
+        .loader-progress { width: 30px; height: 100%; background: linear-gradient(to right, #245edb, #3f8cf3, #245edb); position: absolute; animation: move 1.5s infinite; }
+        @keyframes move { from { left: -30px; } to { left: 150px; } }
     </style>
 </head>
 <body>
     <div id="root">
-        <div class="loading-text">Iniciando Windows XP...</div>
+        <div class="loading-screen">
+            <div class="xp-logo">Windows<span class="xp-orange">xp</span></div>
+            <div class="loader-bar"><div class="loader-progress"></div></div>
+        </div>
     </div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect } = React;
 
         const CLIENT_ID = "483723699126-qnf9lr8p8c9cnud19lkceiv92022c1rs.apps.googleusercontent.com";
         const SCOPES = "https://www.googleapis.com/auth/drive";
-
-        const getFileIcon = (mimeType, fileName) => {
-            if (mimeType === 'application/vnd.google-apps.folder') return "📁";
-            const ext = fileName.split('.').pop().toLowerCase();
-            const iconMap = {
-                'pdf': '📕', 'doc': '📘', 'docx': '📘', 'xls': '📗', 'xlsx': '📗',
-                'jpg': '🖼️', 'png': '🖼️', 'mp3': '🎵', 'mp4': '🎬', 'txt': '📄'
-            };
-            return iconMap[ext] || '📄';
-        };
 
         const App = () => {
             const [tokenClient, setTokenClient] = useState(null);
             const [accessToken, setAccessToken] = useState(null);
             const [files, setFiles] = useState([]);
             const [currentFolder, setCurrentFolder] = useState({ id: 'root', name: 'Mi unidad' });
-            const [viewMode, setViewMode] = useState('medium');
             const [driveInfo, setDriveInfo] = useState({ limit: 0, usage: 0 });
 
             useEffect(() => {
+                // 1. Cargar GIS
                 const scriptGis = document.createElement('script');
                 scriptGis.src = "https://accounts.google.com/gsi/client";
                 scriptGis.async = true;
@@ -69,6 +54,7 @@
                 };
                 document.head.appendChild(scriptGis);
 
+                // 2. Cargar GAPI
                 const scriptGapi = document.createElement('script');
                 scriptGapi.src = "https://apis.google.com/js/api.js";
                 scriptGapi.onload = () => {
@@ -81,28 +67,77 @@
                 document.head.appendChild(scriptGapi);
             }, []);
 
-            const fetchFiles = async (folderId) => {
-                if (!accessToken) return;
-                try {
-                    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed = false&fields=files(id, name, mimeType, size, modifiedTime)&pageSize=100`, {
-                        headers: { Authorization: `Bearer ${accessToken}` }
-                    });
-                    const data = await res.json();
-                    setFiles(data.files || []);
-
-                    const quotaRes = await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota', {
-                        headers: { Authorization: `Bearer ${accessToken}` }
-                    });
-                    const quotaData = await quotaRes.json();
-                    setDriveInfo({
-                        limit: quotaData.storageQuota.limit || 0,
-                        usage: quotaData.storageQuota.usage || 0
-                    });
-                } catch (e) { console.error(e); }
-            };
-
-            useEffect(() => { if (accessToken) fetchFiles(currentFolder.id); }, [accessToken, currentFolder.id]);
+            useEffect(() => {
+                if (accessToken) {
+                    const fetchAll = async () => {
+                        // Archivos
+                        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q='${currentFolder.id}' in parents and trashed = false&fields=files(id, name, mimeType)&pageSize=100`, {
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+                        const data = await res.json();
+                        setFiles(data.files || []);
+                        
+                        // Cuota
+                        const qRes = await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota', {
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+                        const qData = await qRes.json();
+                        setDriveInfo({ limit: qData.storageQuota.limit, usage: qData.storageQuota.usage });
+                    };
+                    fetchAll();
+                }
+            }, [accessToken, currentFolder.id]);
 
             if (!accessToken) return (
-                <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans overflow-hidden">
-                    <h1 className="text-6xl italic font-bold mb-4 drop-
+                <div className="h-full w-full flex flex-col items-center justify-center bg-[#003399] text-white font-sans">
+                    <div className="xp-logo">Windows<span className="xp-orange">xp</span></div>
+                    <div onClick={() => tokenClient && tokenClient.requestAccessToken()} className="flex items-center gap-4 p-2 bg-white/10 border border-white/20 rounded-lg cursor-pointer hover:bg-white/20 transition-all">
+                        <div className="w-16 h-16 bg-blue-600 rounded border-2 border-white/50 flex items-center justify-center text-3xl">👤</div>
+                        <div className="text-left">
+                            <p className="text-xl font-bold">Workspace User</p>
+                            <p className="text-blue-200 text-sm">Haga clic para conectar Drive</p>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="h-full w-full flex flex-col bg-[#ece9d8] font-sans text-xs">
+                    <div className="h-8 bg-gradient-to-b from-[#0058e6] via-[#3b89ff] to-[#0058e6] flex items-center justify-between px-2 text-white font-bold">
+                        <span>📂 {currentFolder.name} - Drive Explorer</span>
+                        <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-6 border border-white/50 rounded-sm">X</button>
+                    </div>
+
+                    <div className="flex-1 flex overflow-hidden">
+                        <div className="w-64 bg-white border-r border-gray-400 p-2">
+                            <div className="font-bold text-blue-800 border-b mb-2">Carpetas</div>
+                            <div className="cursor-pointer p-1 bg-blue-100">Mi unidad</div>
+                        </div>
+                        <div className="flex-1 bg-white p-4 overflow-y-auto grid grid-cols-4 md:grid-cols-6 gap-4">
+                            {files.map(f => (
+                                <div key={f.id} onDoubleClick={() => f.mimeType.includes('folder') ? setCurrentFolder({id:f.id, name:f.name}) : window.open(`https://drive.google.com/file/d/${f.id}/view`)} className="flex flex-col items-center text-center p-2 hover:bg-blue-700 hover:text-white rounded cursor-pointer">
+                                    <div className="text-4xl">{f.mimeType.includes('folder') ? '📁' : '📄'}</div>
+                                    <span className="truncate w-full">{f.name}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="h-6 bg-[#ece9d8] border-t border-gray-400 flex items-center justify-between px-3 text-[10px] text-gray-700">
+                        <div>{files.length} objetos</div>
+                        <div>{(driveInfo.usage / 1e9).toFixed(2)} GB utilizados</div>
+                    </div>
+
+                    <div className="h-8 bg-[#245edb] flex items-center justify-between">
+                        <div className="bg-green-600 px-6 h-full flex items-center text-white italic font-black text-lg rounded-r-2xl border-r border-black/20">Inicio</div>
+                        <div className="bg-[#0997ff] px-4 h-full flex items-center text-white font-bold">{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
