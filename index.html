@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DriveNavigator XP - v1.3 (Búsqueda)</title>
+    <title>DriveNavigator XP - v1.31 (Ordenamiento)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -19,6 +19,8 @@
         .xp-context-item:hover { background-color: #316ac5; color: white; }
         .xp-input { border: 1px solid #7f9db9; padding: 2px 4px; outline: none; }
         .xp-input:focus { border-color: #ff9d00; }
+        th { cursor: pointer; user-select: none; }
+        th:hover { background-color: #e2e2e2; }
     </style>
 </head>
 <body>
@@ -50,13 +52,9 @@
             const [contextMenu, setContextMenu] = useState(null);
             const [viewMode, setViewMode] = useState('medium');
             const [driveInfo, setDriveInfo] = useState({ limit: 0, usage: 0 });
-            const [searchQuery, setSearchQuery] = useState(""); // Estado de búsqueda v1.3
+            const [searchQuery, setSearchQuery] = useState("");
+            const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' }); // v1.31
             const fileInputRef = useRef(null);
-
-            // Filtrado en tiempo real v1.3
-            const filteredFiles = useMemo(() => {
-                return files.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
-            }, [files, searchQuery]);
 
             useEffect(() => {
                 const scriptGis = document.createElement('script');
@@ -110,6 +108,35 @@
             };
 
             useEffect(() => { if (accessToken) fetchFiles(currentFolder.id); }, [accessToken, currentFolder.id]);
+
+            const handleSort = (key) => {
+                let direction = 'asc';
+                if (sortConfig.key === key && sortConfig.direction === 'asc') {
+                    direction = 'desc';
+                }
+                setSortConfig({ key, direction });
+            };
+
+            // Filtrado y Ordenamiento v1.31
+            const processedFiles = useMemo(() => {
+                let result = files.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
+                
+                result.sort((a, b) => {
+                    let valA = a[sortConfig.key];
+                    let valB = b[sortConfig.key];
+
+                    // Tratamiento especial para tamaños (pueden ser undefined en carpetas)
+                    if (sortConfig.key === 'size') {
+                        valA = parseInt(valA) || 0;
+                        valB = parseInt(valB) || 0;
+                    }
+
+                    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+                    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+                    return 0;
+                });
+                return result;
+            }, [files, searchQuery, sortConfig]);
 
             const handleOpen = (file) => {
                 if (file.mimeType === 'application/vnd.google-apps.folder') {
@@ -224,27 +251,38 @@
                 <div className="h-full w-full flex flex-col font-sans text-xs bg-[#ece9d8]" onClick={() => {setSelectedFiles([]); setContextMenu(null);}}>
                     <input type="file" ref={fileInputRef} className="hidden" onChange={handleUploadFile} />
                     
-                    {/* Barra de Título */}
                     <div className="h-8 xp-blue-gradient flex items-center justify-between px-2 text-white font-bold flex-shrink-0">
                         <div className="flex items-center gap-2"><span>📂 {currentFolder.name}</span></div>
                         <button onClick={() => window.location.reload()} className="bg-red-600 px-3 h-6 border border-white/50 rounded-sm font-bold shadow-md">X</button>
                     </div>
 
-                    {/* Barra de Herramientas y Búsqueda v1.3 */}
                     <div className="bg-[#ece9d8] border-b border-gray-400 p-1 flex flex-col gap-1 flex-shrink-0">
-                        <div className="flex gap-2">
-                            <button onClick={(e) => {e.stopPropagation(); setViewMode('medium');}} className={`px-3 py-1 border border-gray-400 rounded-sm ${viewMode === 'medium' ? 'bg-white shadow-inner' : 'bg-gray-100'}`}>Iconos</button>
-                            <button onClick={(e) => {e.stopPropagation(); setViewMode('details');}} className={`px-3 py-1 border border-gray-400 rounded-sm ${viewMode === 'details' ? 'bg-white shadow-inner' : 'bg-gray-100'}`}>Detalles</button>
+                        <div className="flex items-center gap-4">
+                            <div className="flex gap-1">
+                                <button onClick={(e) => {e.stopPropagation(); setViewMode('medium');}} className={`px-3 py-1 border border-gray-400 rounded-sm ${viewMode === 'medium' ? 'bg-white shadow-inner' : 'bg-gray-100'}`}>Iconos</button>
+                                <button onClick={(e) => {e.stopPropagation(); setViewMode('details');}} className={`px-3 py-1 border border-gray-400 rounded-sm ${viewMode === 'details' ? 'bg-white shadow-inner' : 'bg-gray-100'}`}>Detalles</button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-600">Ordenar por:</span>
+                                <select 
+                                    className="xp-input text-[11px] bg-white"
+                                    value={sortConfig.key}
+                                    onChange={(e) => handleSort(e.target.value)}
+                                >
+                                    <option value="name">Nombre</option>
+                                    <option value="size">Tamaño</option>
+                                    <option value="modifiedTime">Fecha</option>
+                                </select>
+                                <button onClick={() => setSortConfig(p => ({...p, direction: p.direction === 'asc' ? 'desc' : 'asc'}))} className="px-2 border border-gray-400 bg-white">
+                                    {sortConfig.direction === 'asc' ? '↑' : '↓'}
+                                </button>
+                            </div>
                         </div>
                         <div className="flex items-center gap-2 p-1 bg-[#f1f1f1] border border-gray-300 rounded-sm">
                             <span className="text-gray-600 font-bold ml-1">Búsqueda:</span>
                             <input 
-                                type="text" 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Escriba para filtrar archivos..."
-                                className="flex-1 xp-input text-[11px]"
-                                onClick={(e) => e.stopPropagation()}
+                                type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Escriba para filtrar archivos..." className="flex-1 xp-input text-[11px]" onClick={(e) => e.stopPropagation()}
                             />
                             {searchQuery && <button onClick={() => setSearchQuery("")} className="px-2 text-red-600 font-bold">✕</button>}
                         </div>
@@ -256,19 +294,46 @@
                             <FolderItem folder={{ id: 'root', name: 'Mi unidad' }} />
                         </div>
 
-                        <div className="flex-1 bg-white overflow-y-auto p-4 relative" onContextMenu={(e) => handleContextMenu(e)}>
-                            <div className={viewMode === 'details' ? 'flex flex-col' : 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-6'}>
-                                {filteredFiles.length > 0 ? filteredFiles.map(f => (
-                                    <div key={f.id} 
-                                         onClick={(e) => {e.stopPropagation(); setContextMenu(null); if (e.ctrlKey) {setSelectedFiles(prev => prev.includes(f.id) ? prev.filter(i => i !== f.id) : [...prev, f.id]);} else {setSelectedFiles([f.id]);}}}
-                                         onContextMenu={(e) => handleContextMenu(e, f)}
-                                         onDoubleClick={() => handleOpen(f)}
-                                         className={`flex cursor-pointer items-center p-2 rounded transition-all ${selectedFiles.includes(f.id) ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-100'} ${viewMode === 'medium' ? 'flex-col text-center' : 'flex-row gap-4 border-b w-full'}`}>
-                                        <span className={viewMode === 'medium' ? 'text-4xl' : 'text-xl'}>{getFileIcon(f.mimeType, f.name)}</span>
-                                        <span className="truncate w-full font-medium">{f.name}</span>
-                                    </div>
-                                )) : <div className="col-span-full text-center text-gray-400 mt-10 italic">No se encontraron archivos con ese nombre</div>}
-                            </div>
+                        <div className="flex-1 bg-white overflow-y-auto relative shadow-inner" onContextMenu={(e) => handleContextMenu(e)}>
+                            {viewMode === 'details' ? (
+                                <table className="w-full text-left border-collapse">
+                                    <thead className="bg-[#f1f1f1] sticky top-0 border-b border-gray-300 z-10 text-gray-700">
+                                        <tr>
+                                            <th className="p-2 border-r font-normal" onClick={() => handleSort('name')}>Nombre {sortConfig.key === 'name' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}</th>
+                                            <th className="p-2 border-r font-normal w-24" onClick={() => handleSort('size')}>Tamaño {sortConfig.key === 'size' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}</th>
+                                            <th className="p-2 font-normal w-40" onClick={() => handleSort('modifiedTime')}>Modificado {sortConfig.key === 'modifiedTime' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {processedFiles.map(f => (
+                                            <tr key={f.id} 
+                                                onClick={(e) => handleSelect(f.id, e)}
+                                                onContextMenu={(e) => handleContextMenu(e, f)}
+                                                onDoubleClick={() => handleOpen(f)}
+                                                className={`cursor-pointer border-b ${selectedFiles.includes(f.id) ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-50'}`}>
+                                                <td className="p-1 flex items-center gap-2 truncate">
+                                                    <span>{getFileIcon(f.mimeType, f.name)}</span> {f.name}
+                                                </td>
+                                                <td className="p-1 text-gray-500">{f.size ? (f.size / 1024).toFixed(1) + ' KB' : '--'}</td>
+                                                <td className="p-1 text-gray-500">{new Date(f.modifiedTime).toLocaleDateString()}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-6 p-4">
+                                    {processedFiles.map(f => (
+                                        <div key={f.id} 
+                                             onClick={(e) => {e.stopPropagation(); if (e.ctrlKey) {setSelectedFiles(prev => prev.includes(f.id) ? prev.filter(i => i !== f.id) : [...prev, f.id]);} else {setSelectedFiles([f.id]);}}}
+                                             onContextMenu={(e) => handleContextMenu(e, f)}
+                                             onDoubleClick={() => handleOpen(f)}
+                                             className={`flex flex-col cursor-pointer items-center p-2 rounded transition-all text-center ${selectedFiles.includes(f.id) ? 'bg-[#316ac5] text-white' : 'hover:bg-blue-100'}`}>
+                                            <span className="text-4xl">{getFileIcon(f.mimeType, f.name)}</span>
+                                            <span className="truncate w-full font-medium">{f.name}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
 
                             {contextMenu && (
                                 <div className="xp-context-menu fixed w-48 py-1" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
@@ -291,12 +356,12 @@
                     </div>
 
                     <div className="h-6 bg-[#ece9d8] border-t border-gray-400 flex items-center justify-between px-3 text-[10px] text-gray-700 flex-shrink-0 font-medium">
-                        <div>{filteredFiles.length} objetos mostrados | {selectedFiles.length} seleccionados</div>
+                        <div>{processedFiles.length} objetos mostrados | {selectedFiles.length} seleccionados</div>
                         <div>Uso: {(driveInfo.usage / 1e9).toFixed(2)} GB / {(driveInfo.limit / 1e9).toFixed(0)} GB</div>
                     </div>
 
                     <div className="h-8 xp-taskbar flex items-center justify-between px-0 flex-shrink-0 border-t border-white/30">
-                        <div className="bg-green-600 px-6 h-full flex items-center text-white italic font-black text-lg rounded-r-2xl shadow-lg border-r border-black/20 cursor-pointer">Inicio</div>
+                        <div className="bg-green-600 px-6 h-full flex items-center text-white italic font-black text-lg rounded-r-2xl shadow-lg border-r border-black/20">Inicio</div>
                         <div className="bg-[#0997ff] px-4 h-full flex items-center text-white font-bold shadow-inner">
                             {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                         </div>
